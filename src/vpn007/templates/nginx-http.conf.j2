@@ -1,0 +1,108 @@
+{# Template: nginx-http.conf — Nginx HTTP (L7) path-based routing with TLS termination #}
+{# © Vadim Pavlov 2026 #}
+{# This configuration handles TLS termination and path-based routing for traffic #}
+{# forwarded from the stream block. It accepts PROXY protocol headers to extract #}
+{# real client IPs. Panel access is restricted via allow/deny directives. #}
+
+# Rate limiting zone for panel login protection (5 req/s per client IP)
+limit_req_zone $proxy_protocol_addr zone=panel_limit:10m rate=5r/s;
+
+{% if cover_site_mode == "proxy" %}
+# Proxy cache for cover site in PROXY mode
+proxy_cache_path /var/cache/nginx/cover_cache levels=1:2 keys_zone=cover_cache:10m max_size=100m inactive=60m;
+{% endif %}
+
+# Port 80: ACME HTTP-01 challenges + redirect to HTTPS
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ domain }};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# Port 10080: TLS-terminated traffic from stream module (with PROXY protocol)
+server {
+    listen 10080 ssl http2 proxy_protocol;
+
+    server_name {{ domain }};
+
+    # Extract real client IP from PROXY protocol header sent by stream block
+    set_real_ip_from 127.0.0.1;
+    set_real_ip_from 172.20.0.0/16;
+    real_ip_header proxy_protocol;
+
+    # TLS certificates
+    ssl_certificate     /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+
+    # TLS protocol versions (configurable, defaults to TLS 1.2 + 1.3)
+    # ECH/ESNI is NOT advertised — no ssl_ech directive
+    ssl_protocols {{ ssl_protocols }};
+
+    # Strong cipher suites: TLS 1.3 preferred, TLS 1.2 limited to ECDHE+AESGCM and ECDHE+CHACHA20POLY1305
+    ssl_ciphers TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers on;
+
+    # ALPN: advertise h2, http/1.1
+    ssl_alpn h2 http/1.1;
+
+    # 3x-ui panel (IP-restricted + rate-limited)
+    location {{ xui_path_prefix }}/ {
+        include /etc/nginx/conf.d/approved_panel_ips.conf;
+        deny all;
+
+        limit_req zone=panel_limit burst=10 nodelay;
+
+        proxy_pass http://{{ three_x_ui_upstream }}/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # AmneziaWG panel (IP-restricted + rate-limited)
+    # AmneziaWG runs on host network, reached via host.docker.internal
+    location {{ awg_panel_path_prefix }}/ {
+        include /etc/nginx/conf.d/approved_panel_ips.conf;
+        deny all;
+
+        limit_req zone=panel_limit burst=10 nodelay;
+
+        proxy_pass http://host.docker.internal:{{ awg_panel_port }}/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Default: cover site
+{% if cover_site_mode == "proxy" and cover_site_url %}
+    # PROXY mode: reverse proxy to external site with aggressive caching
+    location / {
+        proxy_pass http://cover_site:80;
+        proxy_set_header Host {{ cover_site_domain }};
+        proxy_cache cover_cache;
+        proxy_cache_valid 200 301 302 1h;
+        proxy_intercept_errors on;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+{% else %}
+    # STATIC mode: serve local static files via cover_site container
+    location / {
+        proxy_pass http://cover_site:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+{% endif %}
+}

@@ -1,0 +1,50 @@
+{# Template: nginx-stream.conf — Nginx stream (L4) SNI-based routing configuration #}
+{# © Vadim Pavlov 2026 #}
+{# This configuration implements Layer 4 SNI-based routing: Reality SNI traffic #}
+{# goes directly to Xray (raw TCP, no TLS termination), everything else goes to #}
+{# the Nginx HTTP block for TLS termination and Layer 7 path-based routing. #}
+
+load_module modules/ngx_stream_module.so;
+
+stream {
+    # Map SNI hostname to backend: Reality SNI → Xray, default → Nginx HTTP
+    map $ssl_preread_server_name $backend {
+        {{ reality_sni }}   xray_backend;
+        default             nginx_http_backend;
+    }
+
+    upstream xray_backend {
+        server {{ xray_upstream }};
+    }
+
+    upstream nginx_http_backend {
+        server 127.0.0.1:10080;
+    }
+
+    # Main listener on port 443 — SNI-based routing with PROXY protocol
+    # PROXY protocol is enabled globally because Nginx stream cannot set
+    # proxy_protocol per-upstream in map mode. Both Xray and the HTTP
+    # backend are configured to accept PROXY protocol headers.
+    server {
+{% if incoming_ip %}
+        listen {{ incoming_ip }}:443;
+        listen [::]:443;
+{% else %}
+        listen 443;
+        listen [::]:443;
+{% endif %}
+{% if enable_port_8443 %}
+{% if incoming_ip %}
+        listen {{ incoming_ip }}:8443;
+        listen [::]:8443;
+{% else %}
+        listen 8443;
+        listen [::]:8443;
+{% endif %}
+{% endif %}
+
+        ssl_preread on;
+        proxy_pass $backend;
+        proxy_protocol on;
+    }
+}

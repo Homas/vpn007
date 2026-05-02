@@ -1,0 +1,12 @@
+{# Template: hostname-resolver.timer — systemd timer unit for periodic hostname resolution #}
+{# © Vadim Pavlov 2026 #}
+[Unit]
+Description=VPN007 Hostname Resolver Timer — periodic hostname re-resolution
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec={{ hostname_resolve_interval_min }}min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

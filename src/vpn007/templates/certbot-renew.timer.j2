@@ -1,0 +1,16 @@
+# certbot-renew.timer — systemd timer for periodic certificate renewal
+# © Vadim Pavlov 2026
+#
+# Certbot certificates are valid for 90 days. This timer runs renewal
+# twice daily (every 12 hours) as recommended by Let's Encrypt.
+
+[Unit]
+Description=Run certbot certificate renewal twice daily (VPN007)
+
+[Timer]
+OnCalendar=*-*-* 00/12:00:00
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,16 @@
+# certbot-renew.service — systemd service unit for certbot certificate renewal
+# © Vadim Pavlov 2026
+
+[Unit]
+Description=Renew TLS certificates via certbot (VPN007)
+Requires=docker.service
+After=docker.service containerd.service
+
+[Service]
+Type=oneshot
+ExecStart={{ scripts_dir }}/certbot-renew.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,165 @@
+{# Template: docker-compose.yml — Docker Compose service definitions for all VPN services #}
+{# © Vadim Pavlov 2026 #}
+
+services:
+  # --- Layer 4/7 Reverse Proxy (Nginx with stream module) ---
+  reverse_proxy:
+    image: nginx:mainline-alpine
+    container_name: vpn007_reverse_proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "{{ incoming_ip ~ ':' if incoming_ip }}443:443"
+{% if enable_port_8443 %}
+      - "{{ incoming_ip ~ ':' if incoming_ip }}8443:8443"
+{% endif %}
+    volumes:
+      - ./nginx/stream.conf:/etc/nginx/stream.conf:ro
+      - ./nginx/http.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/approved_panel_ips.conf:/etc/nginx/conf.d/approved_panel_ips.conf:ro
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot:ro
+      - ./nginx/self-signed:/etc/nginx/self-signed:ro
+    networks:
+      vpn_net:
+        ipv4_address: 172.20.0.2
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - three_x_ui
+      - cover_site
+
+  # --- 3x-ui with embedded Xray (VLESS+Reality) ---
+  three_x_ui:
+    image: ghcr.io/mhsanaei/3x-ui:latest
+    container_name: vpn007_three_x_ui
+    restart: unless-stopped
+    volumes:
+      - three_x_ui_data:/etc/x-ui
+      - ./xray/config.json:/etc/x-ui/xray.json:ro
+    environment:
+      - XUI_LOG_LEVEL=warn
+    networks:
+      vpn_net:
+        ipv4_address: 172.20.0.3
+
+  # --- AmneziaWG 2.0 VPN + Panel ---
+  amneziawg:
+{% if use_custom_awg_image %}
+    build:
+      context: .
+      dockerfile: Dockerfile.amneziawg
+    image: vpn007/amneziawg:2.0
+{% else %}
+    image: ghcr.io/wg-easy/wg-easy:15
+{% endif %}
+    container_name: vpn007_amneziawg
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - /lib/modules:/lib/modules:ro
+{% if use_custom_awg_image %}
+      - amneziawg_data:/etc/amneziawg
+{% else %}
+      - amneziawg_data:/etc/wireguard
+{% endif %}
+    environment:
+{% if not use_custom_awg_image %}
+      - EXPERIMENTAL_AWG=true
+      - OVERRIDE_AUTO_AWG=awg
+{% endif %}
+      - WG_HOST={{ domain }}
+      - WG_PORT={{ awg_listen_port }}
+      - PORT={{ awg_panel_port }}
+{% if not use_custom_awg_image %}
+      - WG_DEFAULT_ADDRESS=10.8.0.x
+      - WG_DEFAULT_DNS=1.1.1.1
+{% endif %}
+      - WEBUI_HOST=127.0.0.1
+{% if awg_obfuscation %}
+      - AWG_S1={{ awg_obfuscation.s1 }}
+      - AWG_S2={{ awg_obfuscation.s2 }}
+      - AWG_S3={{ awg_obfuscation.s3 }}
+      - AWG_S4={{ awg_obfuscation.s4 }}
+      - AWG_H1={{ awg_obfuscation.h1 }}
+      - AWG_H2={{ awg_obfuscation.h2 }}
+      - AWG_H3={{ awg_obfuscation.h3 }}
+      - AWG_H4={{ awg_obfuscation.h4 }}
+      - AWG_JC={{ awg_obfuscation.jc }}
+      - AWG_JMIN={{ awg_obfuscation.jmin }}
+      - AWG_JMAX={{ awg_obfuscation.jmax }}
+      - AWG_I1={{ awg_obfuscation.i1 }}
+      - AWG_I2={{ awg_obfuscation.i2 }}
+      - AWG_I3={{ awg_obfuscation.i3 }}
+      - AWG_I4={{ awg_obfuscation.i4 }}
+      - AWG_I5={{ awg_obfuscation.i5 }}
+{% endif %}
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv4.ip_forward=1
+
+  # --- Tailscale mesh VPN ---
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: vpn007_tailscale
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - tailscale_data:/var/lib/tailscale
+    environment:
+      - TS_STATE_DIR=/var/lib/tailscale
+{% if tailscale_auth_key %}
+      - TS_AUTHKEY={{ tailscale_auth_key }}
+{% endif %}
+
+  # --- Cover site (plausible deniability) ---
+  cover_site:
+    image: nginx:alpine
+    container_name: vpn007_cover_site
+    restart: unless-stopped
+{% if cover_site_mode == "static" and cover_site_static_path %}
+    volumes:
+      - {{ cover_site_static_path }}:/usr/share/nginx/html:ro
+{% endif %}
+    networks:
+      vpn_net:
+        ipv4_address: 172.20.0.4
+
+  # --- Certbot utility (not a long-running service) ---
+  certbot:
+    image: certbot/certbot:latest
+    container_name: vpn007_certbot
+    profiles:
+      - certbot
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+
+volumes:
+  three_x_ui_data:
+    name: vpn007_three_x_ui_data
+  amneziawg_data:
+    name: vpn007_amneziawg_data
+  tailscale_data:
+    name: vpn007_tailscale_data
+  letsencrypt:
+    name: vpn007_letsencrypt
+  certbot_webroot:
+    name: vpn007_certbot_webroot
+
+networks:
+  vpn_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

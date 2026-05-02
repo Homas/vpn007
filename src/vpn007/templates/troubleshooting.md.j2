@@ -1,0 +1,458 @@
+{# Template: troubleshooting.md — Troubleshooting guide for common failure scenarios #}
+# VPN007 Troubleshooting Guide
+
+© Vadim Pavlov 2026
+
+> Troubleshooting guide for the VPN007 deployment on **{{ domain }}**.
+
+---
+
+## Table of Contents
+
+- [Common Failure Scenarios](#common-failure-scenarios)
+- [Diagnostic Commands](#diagnostic-commands)
+- [TSPU/DPI Evasion Notes](#tspudpi-evasion-notes)
+- [AmneziaWG-Specific Issues](#amneziawg-specific-issues)
+- [Forwarding Troubleshooting](#forwarding-troubleshooting)
+
+---
+
+## Common Failure Scenarios
+
+### Container Won't Start
+
+**Symptoms:** `docker compose ps` shows a service as `exited` or `restarting`.
+
+**Diagnostic steps:**
+
+1. Check container logs:
+   ```bash
+   docker compose logs <service_name>
+   docker compose logs --tail=50 three_x_ui
+   docker compose logs --tail=50 amneziawg
+   ```
+
+2. Check if the container exited with an error:
+   ```bash
+   docker compose ps -a
+   docker inspect <container_id> --format='{% raw %}{{.State.ExitCode}} {{.State.Error}}{% endraw %}'
+   ```
+
+3. Verify Docker daemon is running:
+   ```bash
+   systemctl status docker
+   ```
+
+4. Check for port conflicts:
+   ```bash
+   ss -tlnp | grep -E ':(443|80|{{ awg_listen_port or "51820" }})'
+   ```
+
+5. Restart the failed service:
+   ```bash
+   docker compose up -d --no-deps <service_name>
+   ```
+
+### TLS Certificate Errors
+
+**Symptoms:** Browser shows certificate warnings, `curl -v` reports TLS errors.
+
+**Diagnostic steps:**
+
+1. Check certificate status:
+   ```bash
+   openssl s_client -connect {{ domain }}:443 -servername {{ domain }} < /dev/null 2>&1 | openssl x509 -noout -dates
+   ```
+
+2. Verify certbot can reach the ACME server:
+   ```bash
+   docker compose run --rm certbot certificates
+   ```
+
+3. Check if port 80 is accessible for HTTP-01 challenges:
+   ```bash
+   # Temporarily open port 80
+   sudo nft add rule inet filter input tcp dport 80 accept
+   curl -v http://{{ domain }}/.well-known/acme-challenge/test
+   ```
+
+4. Force certificate renewal:
+   ```bash
+   sudo systemctl start certbot-renew.service
+   journalctl -u certbot-renew.service -n 50
+   ```
+
+5. Reload Nginx after certificate update:
+   ```bash
+   docker compose exec reverse_proxy nginx -s reload
+   ```
+
+### Panel Inaccessible (IP Not Approved)
+
+**Symptoms:** 403 Forbidden when accessing `{{ xui_path_prefix }}/` or `{{ awg_panel_path_prefix }}/`.
+
+**Diagnostic steps:**
+
+1. Check your current public IP:
+   ```bash
+   curl -4 ifconfig.me
+   ```
+
+2. Verify the approved IPs in the Nginx config:
+   ```bash
+   docker compose exec reverse_proxy cat /etc/nginx/conf.d/approved_panel_ips.conf
+   ```
+
+3. Check Nginx access logs for denied requests:
+   ```bash
+   docker compose logs reverse_proxy | grep "403"
+   ```
+
+4. If your IP changed, update the approved IPs:
+   - Edit the `.env` file and update `APPROVED_IPS`
+   - Re-run the deployer or manually update the Nginx include file
+   - Reload Nginx: `docker compose exec reverse_proxy nginx -s reload`
+
+5. If using hostname-based approval, trigger a hostname re-resolution:
+   ```bash
+   sudo systemctl start hostname-resolver.service
+   ```
+
+### AmneziaWG Kernel Module Fails to Load
+
+**Symptoms:** AmneziaWG container starts but VPN connections fail, logs show
+kernel module errors.
+
+**Diagnostic steps:**
+
+1. Check if the kernel module is loaded:
+   ```bash
+   lsmod | grep amneziawg
+   ```
+
+2. Check kernel module compilation logs:
+   ```bash
+   dmesg | grep -i amnezia
+   journalctl -k | grep -i amnezia
+   ```
+
+3. Verify kernel headers are installed:
+   ```bash
+   # Debian/Ubuntu
+   apt list --installed | grep linux-headers
+   # Alpine
+   apk info | grep linux-headers
+   ```
+
+4. If the kernel module cannot load, the system should fall back to
+   `amneziawg-go` userspace implementation. Check which is running:
+   ```bash
+   docker compose exec amneziawg awg show
+   # If using amneziawg-go, the interface will show as a userspace device
+   ```
+
+### Blocklist Updater Can't Resolve AS Numbers
+
+**Symptoms:** Blocked AS prefixes are not being updated, systemd timer shows failures.
+
+**Diagnostic steps:**
+
+1. Check the timer status:
+   ```bash
+   systemctl status blocklist-updater.timer
+   systemctl status blocklist-updater.service
+   ```
+
+2. View updater logs:
+   ```bash
+   journalctl -u blocklist-updater.service -n 50
+   ```
+
+3. Test AS resolution manually:
+   ```bash
+   # Via Team Cymru whois
+   whois -h whois.radb.net -- '-i origin AS61280' | grep route
+   # Via RIPE RIS API
+   curl -s "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS61280"
+   ```
+
+4. Check DNS resolution:
+   ```bash
+   dig whois.radb.net
+   ```
+
+5. Manually trigger the updater:
+   ```bash
+   sudo systemctl start blocklist-updater.service
+   ```
+
+---
+
+## Diagnostic Commands
+
+### Docker Compose
+
+```bash
+# Service status
+docker compose ps
+
+# Service logs (follow mode)
+docker compose logs -f <service>
+
+# All service logs
+docker compose logs
+
+# Restart a service
+docker compose restart <service>
+
+# Rebuild and restart
+docker compose up -d --build <service>
+```
+
+### Firewall (nftables)
+
+```bash
+# List full ruleset
+sudo nft list ruleset
+
+# List specific table
+sudo nft list table inet filter
+
+# List blocked IP sets
+sudo nft list set inet filter blocked_v4
+sudo nft list set inet filter blocked_v6
+
+# Count rules
+sudo nft list chain inet filter input
+
+# Flush and reload
+sudo nft flush ruleset
+sudo nft -f /etc/nftables.conf
+```
+
+### Systemd Timers
+
+```bash
+# List all timers
+systemctl list-timers --all
+
+# Check specific timer
+systemctl status blocklist-updater.timer
+systemctl status hostname-resolver.timer
+systemctl status certbot-renew.timer
+
+# View service logs
+journalctl -u blocklist-updater.service
+journalctl -u hostname-resolver.service
+journalctl -u certbot-renew.service
+```
+
+### TLS / Connectivity
+
+```bash
+# Test TLS connection
+curl -v https://{{ domain }}/
+
+# Test TLS with specific version
+openssl s_client -connect {{ domain }}:443 -servername {{ domain }} -tls1_3
+
+# Test Reality SNI target
+openssl s_client -connect {{ reality_sni }}:443 -tls1_3 < /dev/null
+
+# Check certificate details
+echo | openssl s_client -connect {{ domain }}:443 -servername {{ domain }} 2>/dev/null | openssl x509 -noout -text
+
+# Test Nginx configuration
+docker compose exec reverse_proxy nginx -t
+```
+
+---
+
+## TSPU/DPI Evasion Notes
+
+Russia's TSPU (Technical Means of Countering Threats) deploys DPI hardware at
+ISP level. The following behaviors have been observed and should be considered
+when troubleshooting connectivity issues:
+
+### ECH/ESNI Blocking
+
+Since **November 2024**, Russia's TSPU actively blocks connections that use
+Encrypted Client Hello (ECH) or Encrypted Server Name Indication (ESNI) TLS
+extensions. VPN007 is configured to **not advertise ECH/ESNI** on the reverse
+proxy to avoid triggering these blocks.
+
+**If connections are being dropped:**
+- Verify the Nginx configuration does not include ECH/ESNI directives
+- Check that no upstream CDN or proxy is adding ECH headers
+
+### TLS 1.3 TCP Session Throttling
+
+TSPU has been observed to **freeze or throttle TLS 1.3 TCP sessions** that
+exceed approximately **15-20 KB** of data on connections to foreign datacenter
+IP addresses. This manifests as:
+
+- Connections that establish successfully but stall during data transfer
+- Intermittent timeouts on large page loads or file downloads
+- Cover site pages loading partially then hanging
+
+**Mitigation:**
+{% if "1.2" in tls_versions %}
+- TLS 1.2 fallback is **enabled** for this deployment, which may help in
+  affected scenarios
+{% else %}
+- Consider enabling TLS 1.2 fallback by adding `"1.2"` to `TLS_VERSIONS`
+  in the `.env` file
+{% endif %}
+- The VLESS+Reality protocol is not affected by this throttling as it mimics
+  a legitimate TLS 1.3 connection to the Reality SNI target
+
+### Port 80 Fingerprinting Risks
+
+Having port 80 permanently open can be used as a fingerprinting signal by DPI
+systems. VPN007 keeps port 80 **closed by default** in the nftables base
+ruleset and only opens it dynamically during certbot certificate renewal.
+
+**If certificate renewal fails:**
+- Check that the certbot-renew.sh script correctly opens/closes port 80
+- Verify the nftables rule is being added and removed:
+  ```bash
+  # During renewal, this rule should be temporarily present:
+  sudo nft list chain inet filter input | grep "tcp dport 80"
+  ```
+
+---
+
+## AmneziaWG-Specific Issues
+
+### Kernel Module vs amneziawg-go
+
+AmneziaWG can run in two modes:
+
+| Mode | Performance | Requirements |
+|------|-------------|-------------|
+| **Kernel module** | Full speed (kernel-space) | Linux headers, DKMS, compatible kernel |
+| **amneziawg-go** | Reduced speed (userspace) | No kernel requirements, works on Alpine |
+
+**To check which mode is running:**
+
+```bash
+# Check for kernel module
+lsmod | grep amneziawg
+
+# If loaded, check version
+cat /sys/module/amneziawg/version
+
+# If not loaded, amneziawg-go userspace is in use
+docker compose exec amneziawg awg show
+```
+
+### Common Kernel Module Compilation Failures
+
+1. **Missing kernel headers:**
+   ```bash
+   # Debian/Ubuntu
+   sudo apt install linux-headers-$(uname -r)
+   # Then restart the AmneziaWG container
+   docker compose restart amneziawg
+   ```
+
+2. **Unsupported kernel version:** Some minimal or custom kernels may not
+   support DKMS module compilation. The system will automatically fall back
+   to `amneziawg-go`.
+
+3. **Alpine Linux:** Alpine does not support DKMS. The deployer automatically
+   uses `amneziawg-go` on Alpine systems.
+
+### AmneziaWG 2.0 Parameter Issues
+
+If clients cannot connect after configuring 2.0 parameters (S3, S4, H1-H4):
+
+1. Verify the server is running AmneziaWG 2.0+:
+   ```bash
+   docker compose exec amneziawg awg --version
+   ```
+
+2. Ensure client apps support AmneziaWG 2.0 parameters. Older clients may
+   not recognize S3/S4 and H-range parameters.
+
+3. Verify obfuscation parameters match between server and client configuration.
+   The S and H parameters **must be identical** on both sides.
+
+---
+
+## Forwarding Troubleshooting
+
+{% if forwarding_enabled %}
+This deployment has inter-VM forwarding **enabled** via {{ tunnel_type or "configured tunnel" }}.
+
+### Tunnel Connectivity Checks
+
+1. **Verify the tunnel interface is up:**
+   ```bash
+   ip link show
+   # Look for the tunnel interface (wg0, tun0, or tailscale0)
+   ```
+
+2. **Ping the remote tunnel endpoint:**
+   ```bash
+   ping {{ secondary_vm_ip or "<secondary_vm_ip>" }}
+   ```
+
+3. **Check tunnel status:**
+   ```bash
+{% if tunnel_type == "wireguard" %}
+   # WireGuard/AmneziaWG tunnel
+   sudo wg show
+{% elif tunnel_type == "ssh" %}
+   # SSH tunnel
+   systemctl status autossh-tunnel
+   ss -tlnp | grep ssh
+{% elif tunnel_type == "tailscale" %}
+   # Tailscale tunnel
+   tailscale status
+   tailscale ping <secondary_hostname>
+{% endif %}
+   ```
+
+### DNAT/SNAT Rule Verification
+
+Check that forwarding rules are correctly configured in nftables:
+
+```bash
+# List NAT rules
+sudo nft list table ip nat
+
+# Verify DNAT rules for forwarded ports
+{% for pf in forwarding_ports %}
+# {{ pf.protocol }}/{{ pf.listen_port }} → {{ pf.forward_port }}
+sudo nft list chain ip nat prerouting | grep "{{ pf.listen_port }}"
+{% endfor %}
+
+# Verify SNAT rules
+sudo nft list chain ip nat postrouting
+```
+
+### Reconnection Backoff Behavior
+
+The forwarding tunnel uses exponential backoff for reconnection:
+
+- **Initial delay:** {{ reconnect_initial_delay_sec }} seconds
+- **Maximum delay:** {{ reconnect_max_delay_sec }} seconds
+- **Pattern:** {{ reconnect_initial_delay_sec }}s → {{ reconnect_initial_delay_sec * 2 }}s → {{ reconnect_initial_delay_sec * 4 }}s → ... → {{ reconnect_max_delay_sec }}s (max)
+- Delay resets to {{ reconnect_initial_delay_sec }}s after a successful reconnection
+
+**If the tunnel is not reconnecting:**
+
+1. Check the forwarding service logs on the secondary VM
+2. Verify network connectivity between primary and secondary VMs
+3. Ensure firewall rules on both VMs allow tunnel traffic
+{% if reverse_initiated %}
+4. This deployment uses **reverse-initiated connections** — the secondary VM
+   initiates the tunnel back to the primary VM. Verify the secondary VM can
+   reach the primary VM.
+{% endif %}
+{% else %}
+Inter-VM forwarding is not enabled for this deployment. If you need to set up
+forwarding, configure the `FORWARDING_ENABLED`, `TUNNEL_TYPE`, and
+`SECONDARY_VM_IP` parameters in the `.env` file.
+{% endif %}

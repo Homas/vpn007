@@ -1,0 +1,428 @@
+{# Template: README.md — Architecture documentation and deployment guide #}
+# VPN007 Deployment Documentation
+
+© Vadim Pavlov 2026
+
+> Auto-generated documentation for the VPN007 deployment on **{{ domain }}**.
+
+---
+
+## Table of Contents
+
+- [Architecture Overview](#architecture-overview)
+- [Deployed Services](#deployed-services)
+- [Hardware Requirements](#hardware-requirements)
+- [Supported Operating Systems](#supported-operating-systems)
+- [Dependencies](#dependencies)
+- [TLS Configuration](#tls-configuration)
+- [Firewall](#firewall)
+- [Multi-IP Configuration](#multi-ip-configuration)
+- [Inter-VM Forwarding](#inter-vm-forwarding)
+- [Certificate Management](#certificate-management)
+- [Systemd Timers](#systemd-timers)
+- [Maintenance](#maintenance)
+- [SNI Selection Guidance](#sni-selection-guidance)
+- [License](#license)
+
+---
+
+## Architecture Overview
+
+VPN007 deploys multiple anti-censorship VPN services on a single VM, orchestrated
+by Docker Compose. Traffic is obfuscated behind standard HTTPS ports using a
+two-layer routing architecture:
+
+### Two-Layer Routing Diagram
+
+```
+Internet Traffic (ports 443/tcp{% if enable_port_8443 %}, 8443/tcp{% endif %})
+        │
+        ▼
+┌─────────────────────────────┐
+│   nftables Firewall         │
+│   (default-deny, AS/subnet  │
+│    blocking, SSH allow)      │
+└──────────┬──────────────────┘
+           │
+           ▼
+┌─────────────────────────────┐
+│  Layer 4: Nginx Stream      │
+│  (SNI-based routing)        │
+│                             │
+│  SNI={{ reality_sni }}      │──► Xray (VLESS+Reality) — raw TCP proxy
+│  SNI={{ domain }}           │──► Nginx HTTP (L7)
+└──────────┬──────────────────┘
+           │
+           ▼
+┌─────────────────────────────┐
+│  Layer 7: Nginx HTTP        │
+│  (TLS termination +         │
+│   path-based routing)       │
+│                             │
+│  {{ xui_path_prefix }}/*    │──► 3x-ui Web Panel (IP-restricted)
+│  {{ awg_panel_path_prefix }}/* │──► AmneziaWG Panel (IP-restricted)
+│  /* (default)               │──► Cover Site
+└─────────────────────────────┘
+```
+
+**Layer 4 (Nginx stream):** Inspects the SNI field in the TLS ClientHello without
+decrypting. Reality-destined traffic (SNI `{{ reality_sni }}`) is proxied directly
+to Xray. All other traffic goes to the Nginx HTTP block.
+
+**Layer 7 (Nginx HTTP):** Terminates TLS using ACME certificates, then routes
+requests by URL path to backend services. Unmatched requests are served by the
+cover site{% if cover_site_url %} (proxying `{{ cover_site_url }}`){% endif %}.
+
+---
+
+## Deployed Services
+
+VPN007 deploys **5 long-running services** plus a certbot utility container:
+
+| # | Service | Container | Port / Access | Description |
+|---|---------|-----------|---------------|-------------|
+| 1 | **Reverse Proxy** | `reverse_proxy` (nginx) | 443/tcp{% if enable_port_8443 %}, 8443/tcp{% endif %}, 80/tcp (ACME only) | L4 SNI routing + L7 path routing with TLS termination |
+| 2 | **Xray (VLESS+Reality)** | `three_x_ui` (3x-ui + embedded Xray) | Internal port {{ xray_internal_port }}, accessed via SNI `{{ reality_sni }}` on 443/tcp | Anti-DPI VPN tunnel mimicking legitimate TLS 1.3 |
+| 3 | **3x-ui Web Panel** | `three_x_ui` | `https://{{ domain }}{{ xui_path_prefix }}/` (IP-restricted) | Browser-based Xray management panel |
+| 4 | **AmneziaWG VPN** | `amneziawg` (host network) | {{ awg_listen_port or "random high port" }}/udp | WireGuard-based VPN with DPI-resistant obfuscation |
+| 5 | **AmneziaWG Panel** | `amneziawg` | `https://{{ domain }}{{ awg_panel_path_prefix }}/` (IP-restricted) | Web interface for AmneziaWG peer management |
+| 6 | **Tailscale** | `tailscale` (host network) | Overlay network (no exposed ports) | Mesh VPN for secure management and inter-node connectivity |
+| 7 | **Cover Site** | `cover_site` (nginx) | Served as default on `https://{{ domain }}/` | Legitimate website for plausible deniability |
+
+**Utility containers:**
+
+- **certbot** — Invoked via `docker compose run --rm certbot` for TLS certificate
+  acquisition and renewal. Not a long-running service.
+
+---
+
+## Hardware Requirements
+
+### Minimum Requirements
+
+| Resource | Minimum | Notes |
+|----------|---------|-------|
+| **CPU** | 1 vCPU | Sufficient for low-traffic deployments |
+| **RAM** | 2 GB | Running all 6 containers + Docker daemon + nftables + systemd timers |
+| **Disk** | 15 GB | Base OS + Docker images + configuration files |
+
+### Recommended Requirements
+
+| Resource | Recommended | Notes |
+|----------|-------------|-------|
+| **CPU** | 2+ vCPU | Multiple concurrent VPN clients, AmneziaWG kernel module compilation |
+| **RAM** | 4 GB | Headroom for Docker image updates and log retention |
+| **Disk** | 30 GB | Docker image layers, log retention, certificate storage |
+
+> **Note:** Disk usage increases with the number of VPN clients, Docker image
+> layers, and log retention. Additional resources may be needed when traffic
+> forwarding to a secondary VM is enabled.
+
+---
+
+## Supported Operating Systems
+
+| OS | Version | Notes |
+|----|---------|-------|
+| **Debian** | 11+ (Bullseye and later) | Recommended; full DKMS support for AmneziaWG kernel module |
+| **Ubuntu** | 22.04+ (Jammy and later) | Full support including kernel module compilation |
+| **Alpine Linux** | 3.18+ | Supported; uses amneziawg-go userspace (no DKMS) |
+
+---
+
+## Dependencies
+
+The following dependencies are required on the host system:
+
+| Dependency | Version | Purpose |
+|------------|---------|---------|
+| **Docker Engine** | Latest stable | Container runtime for all services |
+| **Docker Compose** | v2+ (plugin) | Service orchestration |
+| **Python** | 3.14+ | VPN007 deployer runtime |
+| **nftables** | System package | Firewall management |
+| **curl** | System package | IP auto-detection, health checks |
+| **git** | System package | Repository cloning, version management |
+
+The deployer automatically checks for and installs missing dependencies during
+the prerequisite validation phase.
+
+---
+
+## TLS Configuration
+
+The reverse proxy is configured with the following TLS settings:
+
+- **Accepted TLS versions:** {{ tls_versions | join(", ") | replace("1.2", "TLS 1.2") | replace("1.3", "TLS 1.3") }}
+- **Cipher suites (TLS 1.3):** TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256
+- **Cipher suites (TLS 1.2):** ECDHE+AESGCM, ECDHE+CHACHA20POLY1305 (strong ciphers only)
+- **Server cipher preference:** Enabled (TLS 1.3 ciphers preferred)
+- **ECH/ESNI:** Disabled — actively blocked by Russia's TSPU/DPI systems since November 2024
+
+**Important:** The Xray VLESS+Reality service handles its own TLS 1.3 handshake
+independently of the reverse proxy. TLS version restrictions apply only to the
+Nginx HTTP block, not to Reality connections.
+
+Certificates are provisioned via Let's Encrypt using HTTP-01 challenges through
+the certbot utility container. Port 80 is opened dynamically only during
+certificate acquisition and renewal to minimize DPI fingerprinting surface.
+
+---
+
+## Firewall
+
+The deployment provisions a complete nftables firewall with:
+
+- **Default-deny** inbound policy
+- **Allowed inbound ports:**
+  - 443/tcp (HTTPS)
+{% if enable_port_8443 %}
+  - 8443/tcp (secondary HTTPS)
+{% endif %}
+  - {{ awg_listen_port or "configured" }}/udp (AmneziaWG)
+  - 22/tcp from approved SSH IPs only
+  - 80/tcp opened dynamically during certbot renewal only
+- **AS/subnet blocking** via nftables named sets (`blocked_v4`, `blocked_v6`)
+{% if blocked_as_numbers %}
+  - Blocked AS numbers: {{ blocked_as_numbers | join(", ") }}
+{% endif %}
+{% if blocked_subnets %}
+  - Blocked subnets: {{ blocked_subnets | join(", ") }}
+{% endif %}
+- **Bidirectional blocking** — rules apply to both inbound and outbound traffic
+- **Panel access restriction** — enforced at the Nginx level via `allow`/`deny` directives
+
+### Firewall Management
+
+```bash
+# View current ruleset
+sudo nft list ruleset
+
+# View blocked IP sets
+sudo nft list set inet filter blocked_v4
+sudo nft list set inet filter blocked_v6
+
+# Reload firewall rules
+sudo nft -f /etc/nftables.conf
+```
+
+---
+
+## Multi-IP Configuration
+
+{% if incoming_ip or outgoing_ip %}
+This deployment is configured with separate IPs for incoming and outgoing traffic:
+
+| Direction | IP Address | Purpose |
+|-----------|-----------|---------|
+{% if incoming_ip %}
+| **Incoming** | {{ incoming_ip }} | Reverse proxy bind address for inbound VPN traffic |
+{% endif %}
+{% if outgoing_ip %}
+| **Outgoing** | {{ outgoing_ip }} | Source IP for outbound internet traffic (SNAT) |
+{% endif %}
+{% if public_ipv4 %}
+| **Public IPv4** | {{ public_ipv4 }} | Public-facing address for client configurations |
+{% endif %}
+{% if public_ipv6 %}
+| **Public IPv6** | {{ public_ipv6 }} | Public-facing IPv6 address |
+{% endif %}
+
+The deployer uses private (interface-bound) IPs for bind addresses and public
+(NAT/external) IPs for generated client configurations and DNS records.
+{% else %}
+Multi-IP is not configured for this deployment. The reverse proxy binds to all
+available interfaces. To enable multi-IP, set `INCOMING_IP` and `OUTGOING_IP`
+in the `.env` file.
+{% endif %}
+
+---
+
+## Inter-VM Forwarding
+
+{% if forwarding_enabled %}
+Traffic forwarding is **enabled** for this deployment.
+
+| Setting | Value |
+|---------|-------|
+| **Tunnel type** | {{ tunnel_type or "not configured" }} |
+| **Secondary VM IP** | {{ secondary_vm_ip or "not configured" }} |
+| **Reverse-initiated** | {{ "Yes" if reverse_initiated else "No" }} |
+| **Reconnect initial delay** | {{ reconnect_initial_delay_sec }}s |
+| **Reconnect max delay** | {{ reconnect_max_delay_sec }}s |
+
+{% if forwarding_ports %}
+### Forwarded Ports
+
+| Protocol | Listen Port | Forward Port | Description |
+|----------|-------------|--------------|-------------|
+{% for pf in forwarding_ports %}
+| {{ pf.protocol }} | {{ pf.listen_port }} | {{ pf.forward_port }} | {{ pf.description or "—" }} |
+{% endfor %}
+{% endif %}
+
+All inter-VM traffic is encrypted via the selected tunnel type. The forwarding
+script for the secondary VM is generated at `forwarding-install.py`.
+{% else %}
+Inter-VM forwarding is **not enabled** for this deployment. To enable it, set
+`FORWARDING_ENABLED=true` in the `.env` file along with tunnel type and
+secondary VM configuration.
+{% endif %}
+
+---
+
+## Certificate Management
+
+TLS certificates are managed via Let's Encrypt using the certbot utility container:
+
+### Initial Certificate Acquisition
+
+```bash
+# The deployer runs this automatically during deployment:
+docker compose run --rm certbot certonly \
+  --webroot -w /var/www/certbot \
+  -d {{ domain }} \
+  --agree-tos --non-interactive
+```
+
+### Certificate Renewal
+
+Certificates are renewed automatically via a systemd timer (`certbot-renew.timer`).
+The renewal script:
+
+1. Temporarily opens port 80 in nftables (`nft add rule inet filter input tcp dport 80 accept`)
+2. Runs `docker compose run --rm certbot renew`
+3. Reloads Nginx to pick up new certificates
+4. Closes port 80 in nftables
+
+Port 80 is **not** permanently open — it is only opened during the brief renewal
+window to minimize DPI fingerprinting surface.
+
+---
+
+## Systemd Timers
+
+The deployment installs the following systemd timers:
+
+| Timer | Interval | Purpose |
+|-------|----------|---------|
+| `blocklist-updater.timer` | Every {{ blocklist_update_interval_hours }} hours | Re-resolves AS numbers to IP prefixes and updates nftables blocked sets |
+| `hostname-resolver.timer` | Every {{ hostname_resolve_interval_min }} minutes | Re-resolves approved hostnames to IPs and updates Nginx panel access list |
+| `certbot-renew.timer` | Twice daily (certbot default) | Renews TLS certificates via Let's Encrypt |
+
+### Managing Timers
+
+```bash
+# Check timer status
+systemctl list-timers --all
+
+# View specific timer
+systemctl status blocklist-updater.timer
+
+# View timer logs
+journalctl -u blocklist-updater.service
+
+# Manually trigger a timer
+systemctl start blocklist-updater.service
+```
+
+---
+
+## Maintenance
+
+### Updating Services
+
+```bash
+# Pull latest images for all services
+docker compose pull
+
+# Restart a specific service with the new image
+docker compose up -d --no-deps <service_name>
+
+# Restart all services
+docker compose up -d
+```
+
+### Viewing Logs
+
+```bash
+# View logs for all services
+docker compose logs
+
+# View logs for a specific service
+docker compose logs -f reverse_proxy
+docker compose logs -f three_x_ui
+docker compose logs -f amneziawg
+
+# View recent logs (last 100 lines)
+docker compose logs --tail=100 <service_name>
+```
+
+### Backup
+
+Important data to back up:
+
+- `/etc/letsencrypt/` — TLS certificates
+- Docker volumes (3x-ui data, AmneziaWG config, Tailscale state)
+- `/etc/nftables.conf` — Firewall rules
+- The `.env` file used for deployment
+
+### Restarting the Deployment
+
+```bash
+# Stop all services
+docker compose down
+
+# Start all services
+docker compose up -d
+
+# Verify all services are running
+docker compose ps
+```
+
+---
+
+## SNI Selection Guidance
+
+The Reality SNI target is currently set to **{{ reality_sni }}**. For optimal
+anti-censorship performance:
+
+1. **Prefer sites hosted on the same or nearby AS** as your VPN server. This
+   makes the TLS handshake destination appear geographically consistent with
+   the server's IP address.
+
+2. **Avoid commonly known Reality SNI targets.** Popular choices like
+   `www.google.com` or `www.yahoo.com` may be flagged by advanced DPI systems
+   that maintain lists of known Reality SNI values.
+
+3. **Verify TLS 1.3 support.** The Reality protocol requires the target site
+   to support TLS 1.3. Test with:
+   ```bash
+   openssl s_client -connect {{ reality_sni }}:443 -tls1_3 < /dev/null
+   ```
+
+4. **Choose high-traffic sites** that are commonly accessed from your region.
+   This makes the connection pattern blend in with normal browsing traffic.
+
+5. **Rotate SNI periodically** if you suspect the current target has been
+   identified. Update the `REALITY_SNI` value in your `.env` file and
+   redeploy.
+
+---
+
+## License
+
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
+
+**© Vadim Pavlov 2026**
+
+### Integrated Component Licenses
+
+| Component | License | Notes |
+|-----------|---------|-------|
+| **Xray-core** | MPL-2.0 | VLESS+Reality protocol engine |
+| **3x-ui** | GPL-3.0 | Web panel for Xray management |
+| **AmneziaWG** | GPL-2.0 / MIT | WireGuard fork with obfuscation |
+| **Tailscale** | BSD-3-Clause | Mesh VPN overlay network |
+| **WireGuard** | GPL-2.0 | Base protocol for AmneziaWG |
+
+See the `THIRD-PARTY-LICENSES` file in the project root for full license texts.

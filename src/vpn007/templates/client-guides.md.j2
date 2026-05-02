@@ -1,0 +1,179 @@
+{# Template: client-guides.md — VPN client connection guides for all protocols #}
+# VPN007 Client Connection Guides
+
+© Vadim Pavlov 2026
+
+> Client setup guides for the VPN007 deployment on **{{ domain }}**.
+
+---
+
+## Table of Contents
+
+- [VLESS+Reality Clients](#vlessreality-clients)
+- [AmneziaWG Clients](#amneziawg-clients)
+- [Tailscale Setup](#tailscale-setup)
+
+---
+
+## VLESS+Reality Clients
+
+VLESS+Reality makes your VPN traffic indistinguishable from legitimate TLS 1.3
+connections to **{{ reality_sni }}**. The following client applications support
+VLESS+Reality:
+
+### Supported Client Apps
+
+| Platform | App | Notes |
+|----------|-----|-------|
+| **Android** | [v2rayNG](https://github.com/2dust/v2rayNG) | Recommended for Android; supports VLESS+Reality natively |
+| **Windows** | [v2rayN](https://github.com/2dust/v2rayN) | Full-featured Windows client with GUI |
+| **Linux / macOS** | [Nekoray](https://github.com/MatsuriDayo/nekoray) | Cross-platform client with Xray/sing-box core |
+| **iOS / macOS** | [Shadowrocket](https://apps.apple.com/app/shadowrocket/id932747118) | Paid app; supports VLESS+Reality on iOS |
+
+### Importing via VLESS Share Link
+
+1. Open the 3x-ui web panel at `https://{{ domain }}{{ xui_path_prefix }}/`
+2. Navigate to the inbound settings and create a new client (or use the
+   pre-configured initial client)
+3. Copy the **VLESS share link** (starts with `vless://...`)
+4. In your client app:
+   - **v2rayNG:** Tap the `+` button → "Import config from clipboard"
+   - **v2rayN:** Click "Servers" → "Import from clipboard"
+   - **Nekoray:** Click "Program" → "Add profile from clipboard"
+   - **Shadowrocket:** The link is auto-detected from clipboard on app open
+
+### Importing via QR Code
+
+1. In the 3x-ui panel, click the QR code icon next to the client entry
+2. Scan the QR code with your client app:
+   - **v2rayNG:** Tap `+` → "Import config from QR code"
+   - **Shadowrocket:** Use the built-in QR scanner
+
+### Expected Connection Behavior
+
+- The connection appears as a normal TLS 1.3 handshake to `{{ reality_sni }}`
+- DPI systems see traffic that is indistinguishable from HTTPS browsing
+- Initial connection may take 1-2 seconds longer than standard VPN due to the
+  Reality handshake
+- If the connection fails, verify that `{{ reality_sni }}` supports TLS 1.3
+  from your network
+
+---
+
+## AmneziaWG Clients
+
+AmneziaWG provides WireGuard-based VPN with DPI-resistant obfuscation. The
+server listens on **{{ awg_listen_port or "configured port" }}/udp**.
+
+### Supported Client Apps
+
+| Platform | App | Notes |
+|----------|-----|-------|
+| **Android / iOS** | [AmneziaVPN](https://amnezia.org/) | Official Amnezia client; supports all 2.0 parameters |
+| **Windows / macOS / Linux** | [AmneziaVPN Desktop](https://amnezia.org/) | Official desktop client with full 2.0 support |
+| **All platforms** | Official WireGuard clients | Basic support; may not support 2.0 obfuscation parameters (S3/S4, H1-H4) |
+
+> **Important:** To use the full AmneziaWG 2.0 obfuscation parameter set
+> (S3, S4, H1-H4, I1-I5), you **must** use an AmneziaVPN client. Standard
+> WireGuard clients do not support these parameters.
+
+### Importing .conf File
+
+1. Open the AmneziaWG panel at `https://{{ domain }}{{ awg_panel_path_prefix }}/`
+2. Create a new peer or use the pre-configured initial peer
+3. Download the `.conf` configuration file
+4. Import into your client:
+   - **AmneziaVPN (mobile):** Tap "Add connection" → "Import from file" → select the `.conf` file
+   - **AmneziaVPN (desktop):** Click "Import" → select the `.conf` file
+   - **Official WireGuard client:** "Add Tunnel" → "Import tunnel(s) from file"
+
+### AmneziaWG 2.0 Parameter Compatibility
+
+{% if awg_obfuscation %}
+This server is configured with AmneziaWG 2.0 obfuscation parameters. The
+S and H parameters **must match exactly** between server and client:
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| S1 | {{ awg_obfuscation.s1 }} | Init packet magic header |
+| S2 | {{ awg_obfuscation.s2 }} | Response packet magic header |
+| S3 | {{ awg_obfuscation.s3 }} | Init packet junk size (2.0) |
+| S4 | {{ awg_obfuscation.s4 }} | Response packet junk size (2.0) |
+| H1 | {{ awg_obfuscation.h1 }} | Header transform param 1 |
+| H2 | {{ awg_obfuscation.h2 }} | Header transform param 2 |
+| H3 | {{ awg_obfuscation.h3 }} | Header transform param 3 |
+| H4 | {{ awg_obfuscation.h4 }} | Header transform param 4 |
+| Jc | {{ awg_obfuscation.jc }} | Junk packet count |
+| Jmin | {{ awg_obfuscation.jmin }} | Min junk packet size |
+| Jmax | {{ awg_obfuscation.jmax }} | Max junk packet size |
+
+These parameters are automatically included in the `.conf` file downloaded
+from the AmneziaWG panel.
+{% else %}
+Obfuscation parameters were auto-generated during deployment. They are
+included in the `.conf` files downloaded from the AmneziaWG panel.
+{% endif %}
+
+> **Note:** If a client cannot connect, verify that the client app version
+> supports AmneziaWG 2.0. Older versions may not recognize the S3/S4 and
+> H-range parameters.
+
+---
+
+## Tailscale Setup
+
+Tailscale provides a mesh overlay network for secure management and
+inter-node connectivity.
+
+### Joining the Tailnet
+
+{% if tailscale_auth_key %}
+This deployment was configured with a Tailscale auth key. The Tailscale
+container should have automatically joined the tailnet during deployment.
+
+**To verify:**
+```bash
+docker compose exec tailscale tailscale status
+```
+{% else %}
+This deployment requires manual Tailscale authentication:
+
+1. Check the Tailscale container logs for the authentication URL:
+   ```bash
+   docker compose logs tailscale | grep "https://login.tailscale.com"
+   ```
+
+2. Open the URL in your browser and authenticate with your Tailscale account
+
+3. Verify the device has joined:
+   ```bash
+   docker compose exec tailscale tailscale status
+   ```
+{% endif %}
+
+### Device Authorization
+
+After the VM joins the tailnet:
+
+1. Go to the [Tailscale admin console](https://login.tailscale.com/admin/machines)
+2. Find the new device and approve it if your tailnet requires authorization
+3. Optionally, configure the device as an **exit node** to route all client
+   traffic through the VPN server:
+   ```bash
+   docker compose exec tailscale tailscale up --advertise-exit-node
+   ```
+4. In the admin console, approve the exit node route
+
+### Using Tailscale on Client Devices
+
+1. Install the Tailscale client on your device:
+   - **Windows / macOS / Linux:** [tailscale.com/download](https://tailscale.com/download)
+   - **Android / iOS:** Available in app stores
+
+2. Sign in with the same Tailscale account used for the VPN server
+
+3. Your device will automatically discover the VPN server on the tailnet
+
+4. To use the server as an exit node (route all traffic through it):
+   - **Desktop:** Click the Tailscale tray icon → "Exit Node" → select the server
+   - **Mobile:** Open Tailscale → tap "Exit Node" → select the server

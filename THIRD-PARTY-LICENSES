@@ -1,0 +1,59 @@
+Third-Party Licenses
+====================
+
+VPN007 integrates with the following third-party components. Each component
+is distributed under its own license as listed below. VPN007 does not bundle
+these components directly; they are pulled as Docker images or installed on
+the host at deployment time.
+
+------------------------------------------------------------------------------
+
+Xray-core
+  Project:  https://github.com/XTLS/Xray-core
+  License:  Mozilla Public License 2.0 (MPL-2.0)
+  Summary:  Xray-core is the engine behind VLESS+Reality protocol support.
+            MPL-2.0 is a file-level copyleft license compatible with GPL-3.0.
+            Modified MPL-2.0 files must remain under MPL-2.0; combining with
+            GPL-3.0 code in a larger work is permitted.
+
+------------------------------------------------------------------------------
+
+3x-ui
+  Project:  https://github.com/MHSanaei/3x-ui
+  License:  GNU General Public License v3.0 (GPL-3.0)
+  Summary:  3x-ui is the web panel used to manage Xray inbound/outbound
+            configurations. GPL-3.0 is directly compatible with this project's
+            GPL-3.0 license.
+
+------------------------------------------------------------------------------
+
+AmneziaWG
+  Project:  https://github.com/amnezia-vpn/amneziawg-linux-kernel-module
+            https://github.com/amnezia-vpn/amneziawg-tools
+            https://github.com/amnezia-vpn/amneziawg-go
+  License:  GNU General Public License v2.0 (GPL-2.0) — kernel module and tools
+            MIT License — amneziawg-go userspace implementation
+  Summary:  AmneziaWG provides obfuscated WireGuard tunneling with additional
+            anti-DPI parameters (S1-S4, H1-H4, I1-I5). The kernel module and
+            tools are GPL-2.0, compatible with GPL-3.0 in a combined work.
+            The Go userspace fallback (amneziawg-go) is MIT-licensed.
+
+------------------------------------------------------------------------------
+
+Tailscale
+  Project:  https://github.com/tailscale/tailscale
+  License:  BSD 3-Clause License (BSD-3-Clause)
+  Summary:  Tailscale provides mesh overlay networking for secure management
+            and inter-node connectivity. BSD-3-Clause is a permissive license
+            fully compatible with GPL-3.0.
+
+------------------------------------------------------------------------------
+
+WireGuard
+  Project:  https://www.wireguard.com/
+            https://git.zx2c4.com/wireguard-linux
+            https://git.zx2c4.com/wireguard-tools
+  License:  GNU General Public License v2.0 (GPL-2.0)
+  Summary:  WireGuard is the underlying VPN protocol used by AmneziaWG.
+            The kernel module and tools are GPL-2.0, compatible with GPL-3.0
+            in a combined work.

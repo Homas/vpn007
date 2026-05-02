@@ -1,0 +1,15 @@
+{# Template: blocklist-updater.service — systemd service unit for blocklist updater #}
+{# © Vadim Pavlov 2026 #}
+[Unit]
+Description=VPN007 Blocklist Updater — resolve AS numbers and update nftables blocked sets
+Requires=docker.service
+After=docker.service containerd.service
+
+[Service]
+Type=oneshot
+ExecStart={{ scripts_dir }}/blocklist-updater.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

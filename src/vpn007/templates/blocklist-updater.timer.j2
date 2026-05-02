@@ -1,0 +1,12 @@
+{# Template: blocklist-updater.timer — systemd timer unit for periodic blocklist updates #}
+{# © Vadim Pavlov 2026 #}
+[Unit]
+Description=VPN007 Blocklist Updater Timer — periodic AS prefix resolution
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec={{ blocklist_update_interval_hours }}h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

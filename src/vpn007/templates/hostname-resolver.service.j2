@@ -1,0 +1,15 @@
+{# Template: hostname-resolver.service — systemd service unit for hostname resolver #}
+{# © Vadim Pavlov 2026 #}
+[Unit]
+Description=VPN007 Hostname Resolver — resolve hostnames for panel access control
+Requires=docker.service
+After=docker.service containerd.service
+
+[Service]
+Type=oneshot
+ExecStart={{ scripts_dir }}/hostname-resolver.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

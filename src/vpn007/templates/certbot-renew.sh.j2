@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# certbot-renew.sh — TLS certificate renewal with dynamic port 80 management
+# © Vadim Pavlov 2026
+#
+# This script temporarily opens port 80 in nftables for the ACME HTTP-01
+# challenge, runs certbot renewal via the Docker Compose certbot utility
+# container, then closes port 80 and reloads Nginx with the new certificate.
+#
+# Port 80 is NOT permanently open in the base nftables ruleset to reduce
+# DPI fingerprinting surface. It is only exposed during the brief renewal
+# window controlled by this script.
+
+set -euo pipefail
+
+COMPOSE_DIR="{{ compose_dir }}"
+COMPOSE_PROJECT="{{ compose_project | default('vpn007') }}"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] certbot-renew: $*"
+}
+
+# --- Pre-hook: open port 80 ---
+open_port_80() {
+    log "Opening port 80 in nftables for ACME challenge..."
+    nft add rule inet filter input tcp dport 80 accept comment \"certbot-renew\"
+    log "Port 80 opened."
+}
+
+# --- Post-hook: close port 80 ---
+close_port_80() {
+    log "Closing port 80 in nftables..."
+    # Find and delete the rule we added (identified by the comment)
+    local handle
+    handle=$(nft -a list chain inet filter input 2>/dev/null \
+        | grep 'comment "certbot-renew"' \
+        | grep -oP 'handle \K[0-9]+' \
+        | head -n1)
+    if [ -n "$handle" ]; then
+        nft delete rule inet filter input handle "$handle"
+        log "Port 80 closed (removed rule handle $handle)."
+    else
+        log "WARNING: Could not find certbot-renew nftables rule to remove."
+    fi
+}
+
+# Ensure port 80 is closed even if the script fails
+trap close_port_80 EXIT
+
+# 1. Open port 80
+open_port_80
+
+# 2. Run certbot renewal
+log "Running certbot renewal..."
+cd "$COMPOSE_DIR"
+docker compose -p "$COMPOSE_PROJECT" run --rm certbot renew --quiet
+
+# 3. Reload Nginx to pick up new certificates
+log "Reloading Nginx..."
+docker compose -p "$COMPOSE_PROJECT" exec reverse_proxy nginx -s reload
+
+log "Certificate renewal complete."
