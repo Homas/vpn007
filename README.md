@@ -68,7 +68,7 @@ Dev dependencies (for running tests):
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/vpn007.git
+git clone https://github.com/Homas/vpn007.git
 cd vpn007
 
 # Create a virtual environment

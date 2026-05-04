@@ -13,6 +13,11 @@ authors = [
     { name = "Vadim Pavlov" },
 ]
 keywords = ["vpn", "deployment", "docker", "xray", "amneziawg", "tailscale", "anti-censorship"]
+
+[project.urls]
+Homepage = "https://github.com/Homas/vpn007"
+Repository = "https://github.com/Homas/vpn007"
+Issues = "https://github.com/Homas/vpn007/issues"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
