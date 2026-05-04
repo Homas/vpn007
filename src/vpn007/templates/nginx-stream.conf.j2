@@ -27,11 +27,11 @@ stream {
     # backend are configured to accept PROXY protocol headers.
     server {
 {% if incoming_ip %}
-        listen {{ incoming_ip }}:443;
-        listen [::]:443;
+        listen {{ incoming_ip }}:{{ https_port }};
+        listen [::]:{{ https_port }};
 {% else %}
-        listen 443;
-        listen [::]:443;
+        listen {{ https_port }};
+        listen [::]:{{ https_port }};
 {% endif %}
 {% if enable_port_8443 %}
 {% if incoming_ip %}

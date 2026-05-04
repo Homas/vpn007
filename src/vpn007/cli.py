@@ -159,6 +159,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Comma-separated TLS versions to accept (default: 1.2,1.3)",
     )
+    tls.add_argument(
+        "--skip-certbot",
+        action="store_true",
+        default=None,
+        help="Skip Let's Encrypt certificate acquisition; keep self-signed cert",
+    )
+    tls.add_argument(
+        "--https-port",
+        type=int,
+        default=None,
+        help="Main HTTPS listen port (default: 443). Use a non-standard port for lab/staging",
+    )
 
     # -- Access control ----------------------------------------------------
     acl = parser.add_argument_group("access control")

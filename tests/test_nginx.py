@@ -45,23 +45,24 @@ class TestProperty8NginxRoutingCompleteness:
         assert "load_module modules/ngx_stream_module.so;" in output
 
     @given(config=valid_deploy_config)
-    def test_stream_listens_on_443(self, config: DeployConfig) -> None:
-        """Stream block must listen on port 443."""
+    def test_stream_listens_on_https_port(self, config: DeployConfig) -> None:
+        """Stream block must listen on the configured HTTPS port."""
         output = generate_nginx_stream_config(config)
+        port = config.https_port
         if config.incoming_ip:
-            assert f"{config.incoming_ip}:443" in output
+            assert f"{config.incoming_ip}:{port}" in output
         else:
-            assert "listen 443;" in output
+            assert f"listen {port};" in output
         # IPv6 listener always present
-        assert "listen [::]:443;" in output
+        assert f"listen [::]:{port};" in output
 
     @given(config=valid_deploy_config)
     def test_stream_8443_conditional(self, config: DeployConfig) -> None:
-        """Port 8443 must be present only when enable_port_8443 is True."""
+        """Port 8443 must be present only when enable_port_8443 is True (and not the main HTTPS port)."""
         output = generate_nginx_stream_config(config)
         if config.enable_port_8443:
             assert "8443" in output
-        else:
+        elif config.https_port != 8443:
             assert "8443" not in output
 
     @given(config=valid_deploy_config)
@@ -98,9 +99,9 @@ class TestProperty8NginxRoutingCompleteness:
         """When incoming_ip is set, stream must bind to that IP."""
         output = generate_nginx_stream_config(config)
         if config.incoming_ip:
-            assert f"listen {config.incoming_ip}:443;" in output
+            assert f"listen {config.incoming_ip}:{config.https_port};" in output
         else:
-            assert "listen 443;" in output
+            assert f"listen {config.https_port};" in output
 
     # --- HTTP block properties ---
 
@@ -323,18 +324,18 @@ class TestIncomingIpBinding:
     """Verify incoming IP binding in stream config."""
 
     def test_incoming_ip_binds_to_specific_address(self) -> None:
-        """When incoming_ip is set, stream must bind to that IP on 443."""
+        """When incoming_ip is set, stream must bind to that IP on https_port."""
         config = DeployConfig(
             domain="vpn.example.com", incoming_ip="203.0.113.10"
         )
         output = generate_nginx_stream_config(config)
-        assert "listen 203.0.113.10:443;" in output
+        assert f"listen 203.0.113.10:{config.https_port};" in output
 
     def test_no_incoming_ip_binds_all_interfaces(self) -> None:
         """When incoming_ip is not set, stream must listen on all interfaces."""
         config = DeployConfig(domain="vpn.example.com")
         output = generate_nginx_stream_config(config)
-        assert "listen 443;" in output
+        assert f"listen {config.https_port};" in output
 
     def test_incoming_ip_with_8443(self) -> None:
         """When incoming_ip and 8443 are set, both ports bind to the IP."""
@@ -344,7 +345,7 @@ class TestIncomingIpBinding:
             enable_port_8443=True,
         )
         output = generate_nginx_stream_config(config)
-        assert "listen 203.0.113.10:443;" in output
+        assert f"listen 203.0.113.10:{config.https_port};" in output
         assert "listen 203.0.113.10:8443;" in output
 
 

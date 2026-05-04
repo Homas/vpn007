@@ -141,6 +141,7 @@ def _build_stream_context(config: DeployConfig) -> dict:
         "xray_upstream": f"three_x_ui:{config.xray_internal_port}",
         "incoming_ip": config.incoming_ip,
         "enable_port_8443": config.enable_port_8443,
+        "https_port": config.https_port,
     }
 
 

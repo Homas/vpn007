@@ -153,8 +153,8 @@ class TestDryRun:
         ])
 
         captured = capsys.readouterr()
-        assert "Dry-run mode" in captured.out
         assert "Dry-run complete" in captured.out
+        assert "No containers started" in captured.out
 
 
 # ---------------------------------------------------------------------------

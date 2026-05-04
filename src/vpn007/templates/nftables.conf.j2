@@ -57,8 +57,8 @@ table inet filter {
         # Allow SSH from approved IPs only
         ip saddr @approved_ssh_v4 tcp dport 22 accept
 
-        # Allow HTTPS on port 443
-        tcp dport 443 accept
+        # Allow HTTPS on port {{ https_port }}
+        tcp dport {{ https_port }} accept
 
 {% if enable_port_8443 %}
         # Allow optional secondary HTTPS port

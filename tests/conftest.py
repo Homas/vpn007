@@ -118,6 +118,8 @@ valid_deploy_config = st.builds(
     public_ipv4=st.none() | valid_ipv4,
     public_ipv6=st.none(),
     tls_versions=st.just(["1.2", "1.3"]),
+    skip_certbot=st.booleans(),
+    https_port=st.sampled_from([443, 8443, 9443]),
     approved_ips=st.lists(valid_ipv4, max_size=5),
     approved_hostnames=st.lists(valid_domain, max_size=3),
     ssh_approved_ips=st.lists(valid_ipv4, max_size=3),

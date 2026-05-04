@@ -116,6 +116,7 @@ def _build_template_context(config: DeployConfig) -> dict:
         "domain": _yaml_safe(config.domain),
         "incoming_ip": _yaml_safe(config.incoming_ip) if config.incoming_ip else None,
         "enable_port_8443": config.enable_port_8443,
+        "https_port": config.https_port,
         # AmneziaWG
         "awg_listen_port": awg_listen_port,
         "awg_panel_port": config.awg_panel_port,

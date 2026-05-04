@@ -138,18 +138,19 @@ class TestProperty10NftablesDefaultDeny:
         assert "policy drop;" in output
 
     @given(config=valid_deploy_config)
-    def test_accepts_port_443(self, config: DeployConfig) -> None:
-        """Input chain must accept TCP port 443."""
+    def test_accepts_https_port(self, config: DeployConfig) -> None:
+        """Input chain must accept TCP on the configured HTTPS port."""
         output = generate_nftables_config(config)
-        assert "tcp dport 443 accept" in output
+        assert f"tcp dport {config.https_port} accept" in output
 
     @given(config=valid_deploy_config)
     def test_port_8443_conditional(self, config: DeployConfig) -> None:
-        """Port 8443 accept rule must be present only when enabled."""
+        """Port 8443 accept rule must be present only when enabled (and not the main HTTPS port)."""
         output = generate_nftables_config(config)
         if config.enable_port_8443:
             assert "tcp dport 8443 accept" in output
-        else:
+        elif config.https_port != 8443:
+            # Only check absence if 8443 isn't the main HTTPS port
             assert "tcp dport 8443 accept" not in output
 
     @given(config=valid_deploy_config)
@@ -247,11 +248,11 @@ class TestProperty11MultiIpRouting:
         """When incoming_ip is set, Nginx stream must bind to that IP."""
         output = generate_nginx_stream_config(config)
         if config.incoming_ip:
-            assert f"listen {config.incoming_ip}:443;" in output, (
+            assert f"listen {config.incoming_ip}:{config.https_port};" in output, (
                 f"Nginx stream must bind to incoming IP {config.incoming_ip}"
             )
         else:
-            assert "listen 443;" in output
+            assert f"listen {config.https_port};" in output
 
     @given(config=valid_deploy_config)
     def test_nftables_snat_for_outgoing_ip(

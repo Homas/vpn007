@@ -157,6 +157,8 @@ class DeployConfig:
 
     # TLS configuration
     tls_versions: list[str] = field(default_factory=lambda: ["1.2", "1.3"])
+    skip_certbot: bool = False  # Skip Let's Encrypt; keep self-signed cert
+    https_port: int = 443  # Main HTTPS listen port (change for staging/lab)
 
     # Access control
     approved_ips: list[str] = field(default_factory=list)

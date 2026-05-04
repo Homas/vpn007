@@ -9,7 +9,7 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
-      - "{{ incoming_ip ~ ':' if incoming_ip }}443:443"
+      - "{{ incoming_ip ~ ':' if incoming_ip }}{{ https_port }}:{{ https_port }}"
 {% if enable_port_8443 %}
       - "{{ incoming_ip ~ ':' if incoming_ip }}8443:8443"
 {% endif %}

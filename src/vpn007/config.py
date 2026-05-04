@@ -148,6 +148,8 @@ _ENV_FIELD_MAP: list[tuple[str, str, type | object]] = [
     ("PUBLIC_IPV6", "public_ipv6", str),
     # TLS
     ("TLS_VERSIONS", "tls_versions", _parse_tls_versions),
+    ("SKIP_CERTBOT", "skip_certbot", _parse_bool),
+    ("HTTPS_PORT", "https_port", int),
     # Access control
     ("APPROVED_IPS", "approved_ips", _parse_comma_list),
     ("APPROVED_HOSTNAMES", "approved_hostnames", _parse_comma_list),
@@ -351,7 +353,15 @@ def load_config(cli_args: argparse.Namespace) -> DeployConfig:
     for env_var, field_name, converter in _ENV_FIELD_MAP:
         # CLI takes precedence
         if field_name in cli_dict:
-            config_kwargs[field_name] = cli_dict[field_name]
+            raw_cli = cli_dict[field_name]
+            # Apply the converter to CLI values too (e.g. str → Path, str → int)
+            if isinstance(raw_cli, str):
+                try:
+                    config_kwargs[field_name] = converter(raw_cli)
+                except (ValueError, KeyError):
+                    config_kwargs[field_name] = raw_cli
+            else:
+                config_kwargs[field_name] = raw_cli
         elif env_var in env_values and env_values[env_var] is not None:
             raw = env_values[env_var]
             assert raw is not None  # for type checker

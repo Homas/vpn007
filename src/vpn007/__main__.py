@@ -135,37 +135,62 @@ def main(argv: list[str] | None = None) -> int:
 
     logger.info("Configuration valid")
 
-    # 5. Dry-run: generate configs but skip deployment
+    # 5. Generate all configuration files
     dry_run = getattr(args, "dry_run", False) or False
+
+    try:
+        from vpn007.generator import generate_all, generate_deployment_summary
+
+        logger.info("Generating all configuration files to %s ...", config.output_dir)
+        files = generate_all(config)
+        logger.info("Generated %d files", len(files))
+
+        summary = generate_deployment_summary(config, files)
+        print(summary)
+
+    except DeployError as exc:
+        logger.error("Generation error: %s", exc)
+        if exc.remediation:
+            logger.info("Remediation: %s", exc.remediation)
+        return _SERVICE_EXIT_MAP.get(exc.service, EXIT_FATAL_ERROR)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Unexpected error during generation: %s", exc)
+        return EXIT_FATAL_ERROR
+
     if dry_run:
-        logger.info("Dry-run mode — skipping deployment")
-        logger.info("Checking prerequisites... (skipped: dry-run)")
-        logger.info("Generating Xray config... (skipped: dry-run)")
-        logger.info("Generating Nginx config... (skipped: dry-run)")
-        logger.info("Generating Docker Compose config... (skipped: dry-run)")
-        logger.info("Generating nftables config... (skipped: dry-run)")
-        logger.info("Starting containers... (skipped: dry-run)")
-        logger.info("Dry-run complete")
+        logger.info(
+            "Dry-run complete — configs written to %s. "
+            "No containers started, no firewall rules applied, "
+            "no systemd timers installed, no kernel modules loaded.",
+            config.output_dir,
+        )
         return EXIT_OK
 
-    # 6. Future deployment steps (placeholders)
+    # 6. Full deployment (prerequisites, containers, firewall, timers)
     logger.info("Checking prerequisites...")
-    # TODO: check_prerequisites(config)
-
-    logger.info("Generating Xray config...")
-    # TODO: generate_xray_config(config)
-
-    logger.info("Generating Nginx config...")
-    # TODO: generate_nginx_config(config)
-
-    logger.info("Generating Docker Compose config...")
-    # TODO: generate_compose(config)
-
-    logger.info("Generating nftables config...")
-    # TODO: generate_nftables_config(config)
+    # TODO: prerequisites.check_all(config)
 
     logger.info("Starting containers...")
-    # TODO: compose_up(config)
+    # TODO: docker_ops.compose_up(...)
+
+    logger.info("Acquiring TLS certificate...")
+    # TODO: certbot initial acquisition (skip if config.skip_certbot)
+    if config.skip_certbot:
+        logger.info("SKIP_CERTBOT is set — keeping self-signed certificate")
+    else:
+        pass  # TODO: run certbot
+
+    logger.info("Applying firewall rules...")
+    # TODO: system_ops.apply_nftables(...)
+
+    logger.info("Installing systemd timers...")
+    # TODO: system_ops.install_systemd_timers(...)
+
+    logger.info("Provisioning AmneziaWG kernel module...")
+    # TODO: system_ops.provision_awg_kernel_module(...)
+
+    logger.info("Running smoke tests...")
+    # TODO: system_ops.smoke_test(config)
 
     logger.info("Deployment complete")
     return EXIT_OK

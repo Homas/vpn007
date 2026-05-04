@@ -104,6 +104,7 @@ def generate_nftables_config(config: DeployConfig) -> str:
         "blocked_v6_prefixes": blocked_v6,
         "ssh_approved_ips": config.ssh_approved_ips,
         "enable_port_8443": config.enable_port_8443,
+        "https_port": config.https_port,
         "awg_listen_port": config.awg_listen_port,
         "outgoing_ip": config.outgoing_ip,
     }

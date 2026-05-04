@@ -253,19 +253,19 @@ class TestComposePort8443:
 class TestComposeIncomingIP:
     """Verify incoming IP binding on ports."""
 
-    def test_incoming_ip_binds_443(self) -> None:
+    def test_incoming_ip_binds_https_port(self) -> None:
         config = DeployConfig(
             domain="vpn.example.com", awg_listen_port=34567, incoming_ip="203.0.113.10"
         )
         parsed = yaml.safe_load(generate_compose(config))
         ports = parsed["services"]["reverse_proxy"]["ports"]
-        assert "203.0.113.10:443:443" in ports
+        assert f"203.0.113.10:{config.https_port}:{config.https_port}" in ports
 
     def test_no_incoming_ip_binds_all(self) -> None:
         config = DeployConfig(domain="vpn.example.com", awg_listen_port=34567)
         parsed = yaml.safe_load(generate_compose(config))
         ports = parsed["services"]["reverse_proxy"]["ports"]
-        assert "443:443" in ports
+        assert f"{config.https_port}:{config.https_port}" in ports
 
 
 class TestComposeTailscaleAuthKey:
