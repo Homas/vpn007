@@ -101,12 +101,8 @@ services:
       - ./data/tailscale:/var/lib/tailscale
     environment:
       - TS_STATE_DIR=/var/lib/tailscale
-{% if tailscale_auth_key %}
-      - TS_AUTHKEY={{ tailscale_auth_key }}
-{% endif %}
-{% if tailscale_hostname %}
-      - TS_HOSTNAME={{ tailscale_hostname }}
-{% endif %}
+      - TS_AUTHKEY={{ tailscale_auth_key or '' }}
+      - TS_HOSTNAME={{ tailscale_hostname or '' }}
       - TS_EXTRA_ARGS={{ tailscale_extra_args }}
 
   # --- Cover site (plausible deniability) ---

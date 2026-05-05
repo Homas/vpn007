@@ -35,7 +35,7 @@ ALL_SERVICES = LONG_RUNNING_SERVICES | UTILITY_SERVICES
 EXPECTED_IMAGES = {
     "reverse_proxy": "nginx:mainline-alpine",
     "three_x_ui": "ghcr.io/mhsanaei/3x-ui:latest",
-    "amneziawg": "vpn007/amneziawg:2.0",
+    "amneziawg": "ghcr.io/wg-easy/wg-easy:15",
     "tailscale": "tailscale/tailscale:latest",
     "cover_site": "nginx:alpine",
     "certbot": "certbot/certbot:latest",
@@ -76,20 +76,10 @@ class TestProperty3ComposeServiceCompleteness:
         """Each service must reference the correct Docker image."""
         parsed = yaml.safe_load(generate_compose(config))
         for svc_name, expected_image in EXPECTED_IMAGES.items():
-            if svc_name == "amneziawg":
-                # Custom build image with build directive
-                actual = parsed["services"][svc_name].get("image")
-                assert actual == "vpn007/amneziawg:2.0", (
-                    f"Service amneziawg: expected 'vpn007/amneziawg:2.0', got {actual!r}"
-                )
-                build = parsed["services"][svc_name].get("build")
-                assert build is not None, "amneziawg must have 'build' directive"
-                assert build.get("dockerfile") == "Dockerfile.amneziawg"
-            else:
-                actual = parsed["services"][svc_name].get("image")
-                assert actual == expected_image, (
-                    f"Service {svc_name}: expected image {expected_image!r}, got {actual!r}"
-                )
+            actual = parsed["services"][svc_name].get("image")
+            assert actual == expected_image, (
+                f"Service {svc_name}: expected image {expected_image!r}, got {actual!r}"
+            )
 
     @given(config=valid_deploy_config)
     def test_compose_no_docker_socket_mount(self, config: DeployConfig) -> None:
@@ -282,10 +272,11 @@ class TestComposeTailscaleAuthKey:
         assert "TS_AUTHKEY=tskey-auth-test123" in ts_env
 
     def test_auth_key_absent_when_not_provided(self) -> None:
+        """When tailscale_auth_key is None, TS_AUTHKEY is present but empty."""
         config = DeployConfig(domain="vpn.example.com", awg_listen_port=34567)
         parsed = yaml.safe_load(generate_compose(config))
         ts_env = parsed["services"]["tailscale"]["environment"]
-        assert not any("TS_AUTHKEY" in str(e) for e in ts_env)
+        assert "TS_AUTHKEY=" in ts_env
 
 
 class TestComposeAwgObfuscation:
@@ -330,8 +321,16 @@ class TestComposeAwgObfuscation:
 class TestComposeAmneziawgConfig:
     """Verify AmneziaWG service has required configuration."""
 
-    def test_amneziawg_no_wg_easy_flags(self) -> None:
-        """Custom AmneziaWG 2.0 image should not have wg-easy specific flags."""
+    def test_amneziawg_has_wg_defaults(self) -> None:
+        """wg-easy image should have WG_DEFAULT_ADDRESS and WG_DEFAULT_DNS."""
+        config = DeployConfig(domain="vpn.example.com", awg_listen_port=34567)
+        parsed = yaml.safe_load(generate_compose(config))
+        awg_env = parsed["services"]["amneziawg"]["environment"]
+        assert "WG_DEFAULT_ADDRESS=10.8.0.x" in awg_env
+        assert "WG_DEFAULT_DNS=1.1.1.1" in awg_env
+
+    def test_amneziawg_no_experimental_flags(self) -> None:
+        """wg-easy v15.2+ has native AWG 2.0 — no EXPERIMENTAL flags."""
         config = DeployConfig(domain="vpn.example.com", awg_listen_port=34567)
         parsed = yaml.safe_load(generate_compose(config))
         awg_env = parsed["services"]["amneziawg"]["environment"]
@@ -392,52 +391,28 @@ class TestComposeAwgPortRandomization:
         assert len(ports) > 1, "Random port generation should produce varying ports"
 
 
-class TestComposeAwg20Validation:
-    """Verify the _is_awg_2_0_compatible version checker."""
-
-    def test_version_2_0_compatible(self) -> None:
-        from vpn007.compose import _is_awg_2_0_compatible
-        assert _is_awg_2_0_compatible("amneziawg-tools v2.0.0") is True
-        assert _is_awg_2_0_compatible("2.0.1") is True
-        assert _is_awg_2_0_compatible("v2.1.0") is True
-        assert _is_awg_2_0_compatible("2.0") is True
-
-    def test_version_1_x_not_compatible(self) -> None:
-        from vpn007.compose import _is_awg_2_0_compatible
-        assert _is_awg_2_0_compatible("amneziawg-tools v1.0.0") is False
-        assert _is_awg_2_0_compatible("1.9.9") is False
-        assert _is_awg_2_0_compatible("v1.5.0") is False
-
-    def test_version_empty_not_compatible(self) -> None:
-        from vpn007.compose import _is_awg_2_0_compatible
-        assert _is_awg_2_0_compatible("") is False
-        assert _is_awg_2_0_compatible("unknown") is False
-
-
 # ---------------------------------------------------------------------------
-# Tests for custom AmneziaWG image fallback (Task 10.2)
+# Tests for AmneziaWG image configuration
 # Validates: Requirements 4.3, 4.4
 # ---------------------------------------------------------------------------
 
 
 class TestComposeAwgImage:
-    """Verify AmneziaWG 2.0 custom image configuration in docker-compose generation."""
+    """Verify AmneziaWG 2.0 configuration in docker-compose generation."""
 
-    def test_amneziawg_uses_build_directive(self) -> None:
-        """amneziawg always uses build from Dockerfile.amneziawg."""
+    def test_amneziawg_uses_wg_easy_image(self) -> None:
+        """amneziawg uses ghcr.io/wg-easy/wg-easy:15 (supports AWG 2.0 since v15.2.0)."""
         config = DeployConfig(
             domain="vpn.example.com",
             awg_listen_port=34567,
         )
         parsed = yaml.safe_load(generate_compose(config))
         awg = parsed["services"]["amneziawg"]
-        assert awg.get("build") is not None, "Must have build directive"
-        assert awg["build"]["context"] == "."
-        assert awg["build"]["dockerfile"] == "Dockerfile.amneziawg"
-        assert awg["image"] == "vpn007/amneziawg:2.0"
+        assert awg["image"] == "ghcr.io/wg-easy/wg-easy:15"
+        assert awg.get("build") is None, "Should not have build directive"
 
     def test_amneziawg_no_experimental_flags(self) -> None:
-        """Custom image should not set EXPERIMENTAL_AWG or OVERRIDE_AUTO_AWG."""
+        """wg-easy v15.2+ has native AWG 2.0 support, no EXPERIMENTAL flags needed."""
         config = DeployConfig(
             domain="vpn.example.com",
             awg_listen_port=34567,
@@ -465,15 +440,15 @@ class TestComposeAwgImage:
         assert "WEBUI_HOST=127.0.0.1" in env_str
 
     def test_amneziawg_mounts_data_dir(self) -> None:
-        """amneziawg should mount data to /etc/amneziawg."""
+        """amneziawg should mount data to /etc/wireguard."""
         config = DeployConfig(
             domain="vpn.example.com",
             awg_listen_port=34567,
         )
         parsed = yaml.safe_load(generate_compose(config))
         volumes = parsed["services"]["amneziawg"]["volumes"]
-        assert any("/etc/amneziawg" in str(v) for v in volumes), (
-            "Must mount data to /etc/amneziawg"
+        assert any("/etc/wireguard" in str(v) for v in volumes), (
+            "Must mount data to /etc/wireguard"
         )
 
     def test_amneziawg_with_obfuscation_params(self) -> None:
@@ -664,9 +639,10 @@ class TestProperty7TailscaleConfigCompleteness:
 
     For any valid DeployConfig, the Tailscale service has NET_ADMIN and
     SYS_MODULE capabilities, /dev/net/tun device mapping, a persistent
-    volume for /var/lib/tailscale, restart: unless-stopped. When a
-    tailscale_auth_key is provided, TS_AUTHKEY is set with the correct
-    value; when it is None, TS_AUTHKEY is not present.
+    volume for /var/lib/tailscale, restart: unless-stopped. TS_AUTHKEY,
+    TS_HOSTNAME, and TS_EXTRA_ARGS are always present in the environment.
+    When a tailscale_auth_key is provided, TS_AUTHKEY contains the value;
+    when it is None, TS_AUTHKEY is present but empty.
 
     **Validates: Requirements 5.2, 5.3**
     """
@@ -712,7 +688,7 @@ class TestProperty7TailscaleConfigCompleteness:
 
     @given(config=valid_deploy_config)
     def test_tailscale_auth_key_set_when_provided(self, config: DeployConfig) -> None:
-        """When tailscale_auth_key is provided, TS_AUTHKEY env var is set with the correct value."""
+        """When tailscale_auth_key is provided, TS_AUTHKEY env var contains the value."""
         from dataclasses import replace
 
         config = replace(config, tailscale_auth_key="tskey-auth-testkey1234567890")
@@ -723,13 +699,13 @@ class TestProperty7TailscaleConfigCompleteness:
         )
 
     @given(config=valid_deploy_config)
-    def test_tailscale_auth_key_absent_when_none(self, config: DeployConfig) -> None:
-        """When tailscale_auth_key is None, TS_AUTHKEY must not be present."""
+    def test_tailscale_auth_key_empty_when_none(self, config: DeployConfig) -> None:
+        """When tailscale_auth_key is None, TS_AUTHKEY is present but empty."""
         from dataclasses import replace
 
         config = replace(config, tailscale_auth_key=None)
         parsed = yaml.safe_load(generate_compose(config))
         ts_env = parsed["services"]["tailscale"]["environment"]
-        assert not any("TS_AUTHKEY" in str(e) for e in ts_env), (
-            "TS_AUTHKEY must not be present when tailscale_auth_key is None"
+        assert "TS_AUTHKEY=" in ts_env, (
+            "TS_AUTHKEY must always be present (empty when no key provided)"
         )
