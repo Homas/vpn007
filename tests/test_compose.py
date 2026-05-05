@@ -35,7 +35,7 @@ ALL_SERVICES = LONG_RUNNING_SERVICES | UTILITY_SERVICES
 EXPECTED_IMAGES = {
     "reverse_proxy": "nginx:mainline-alpine",
     "three_x_ui": "ghcr.io/mhsanaei/3x-ui:latest",
-    "amneziawg": "ghcr.io/wg-easy/wg-easy:15",
+    "amneziawg": "vpn007/amneziawg:2.0",
     "tailscale": "tailscale/tailscale:latest",
     "cover_site": "nginx:alpine",
     "certbot": "certbot/certbot:latest",
@@ -76,14 +76,14 @@ class TestProperty3ComposeServiceCompleteness:
         """Each service must reference the correct Docker image."""
         parsed = yaml.safe_load(generate_compose(config))
         for svc_name, expected_image in EXPECTED_IMAGES.items():
-            if svc_name == "amneziawg" and config.use_custom_awg_image:
-                # Custom image mode: image is vpn007/amneziawg:2.0 with build directive
+            if svc_name == "amneziawg":
+                # Custom build image with build directive
                 actual = parsed["services"][svc_name].get("image")
                 assert actual == "vpn007/amneziawg:2.0", (
-                    f"Service amneziawg in custom mode: expected 'vpn007/amneziawg:2.0', got {actual!r}"
+                    f"Service amneziawg: expected 'vpn007/amneziawg:2.0', got {actual!r}"
                 )
                 build = parsed["services"][svc_name].get("build")
-                assert build is not None, "amneziawg in custom mode must have 'build' directive"
+                assert build is not None, "amneziawg must have 'build' directive"
                 assert build.get("dockerfile") == "Dockerfile.amneziawg"
             else:
                 actual = parsed["services"][svc_name].get("image")
@@ -330,12 +330,13 @@ class TestComposeAwgObfuscation:
 class TestComposeAmneziawgConfig:
     """Verify AmneziaWG service has required configuration."""
 
-    def test_amneziawg_experimental_flags(self) -> None:
+    def test_amneziawg_no_wg_easy_flags(self) -> None:
+        """Custom AmneziaWG 2.0 image should not have wg-easy specific flags."""
         config = DeployConfig(domain="vpn.example.com", awg_listen_port=34567)
         parsed = yaml.safe_load(generate_compose(config))
         awg_env = parsed["services"]["amneziawg"]["environment"]
-        assert "EXPERIMENTAL_AWG=true" in awg_env
-        assert "OVERRIDE_AUTO_AWG=awg" in awg_env
+        assert not any("EXPERIMENTAL_AWG" in str(e) for e in awg_env)
+        assert not any("OVERRIDE_AUTO_AWG" in str(e) for e in awg_env)
 
     def test_amneziawg_lib_modules_mount(self) -> None:
         config = DeployConfig(domain="vpn.example.com", awg_listen_port=34567)
@@ -419,15 +420,14 @@ class TestComposeAwg20Validation:
 # ---------------------------------------------------------------------------
 
 
-class TestComposeCustomAwgImage:
-    """Verify custom AmneziaWG 2.0 image fallback in docker-compose generation."""
+class TestComposeAwgImage:
+    """Verify AmneziaWG 2.0 custom image configuration in docker-compose generation."""
 
-    def test_custom_image_uses_build_directive(self) -> None:
-        """When use_custom_awg_image=True, amneziawg uses build instead of image."""
+    def test_amneziawg_uses_build_directive(self) -> None:
+        """amneziawg always uses build from Dockerfile.amneziawg."""
         config = DeployConfig(
             domain="vpn.example.com",
             awg_listen_port=34567,
-            use_custom_awg_image=True,
         )
         parsed = yaml.safe_load(generate_compose(config))
         awg = parsed["services"]["amneziawg"]
@@ -436,28 +436,26 @@ class TestComposeCustomAwgImage:
         assert awg["build"]["dockerfile"] == "Dockerfile.amneziawg"
         assert awg["image"] == "vpn007/amneziawg:2.0"
 
-    def test_custom_image_no_experimental_flags(self) -> None:
-        """Custom image mode should not set EXPERIMENTAL_AWG or OVERRIDE_AUTO_AWG."""
+    def test_amneziawg_no_experimental_flags(self) -> None:
+        """Custom image should not set EXPERIMENTAL_AWG or OVERRIDE_AUTO_AWG."""
         config = DeployConfig(
             domain="vpn.example.com",
             awg_listen_port=34567,
-            use_custom_awg_image=True,
         )
         parsed = yaml.safe_load(generate_compose(config))
         awg_env = parsed["services"]["amneziawg"]["environment"]
         assert not any("EXPERIMENTAL_AWG" in str(e) for e in awg_env), (
-            "Custom image must not set EXPERIMENTAL_AWG"
+            "Must not set EXPERIMENTAL_AWG"
         )
         assert not any("OVERRIDE_AUTO_AWG" in str(e) for e in awg_env), (
-            "Custom image must not set OVERRIDE_AUTO_AWG"
+            "Must not set OVERRIDE_AUTO_AWG"
         )
 
-    def test_custom_image_has_common_env_vars(self) -> None:
-        """Custom image mode should still have WG_HOST, WG_PORT, WEBUI_HOST."""
+    def test_amneziawg_has_common_env_vars(self) -> None:
+        """amneziawg should have WG_HOST, WG_PORT, WEBUI_HOST."""
         config = DeployConfig(
             domain="vpn.example.com",
             awg_listen_port=34567,
-            use_custom_awg_image=True,
         )
         parsed = yaml.safe_load(generate_compose(config))
         awg_env = parsed["services"]["amneziawg"]["environment"]
@@ -466,38 +464,23 @@ class TestComposeCustomAwgImage:
         assert "WG_PORT=34567" in env_str
         assert "WEBUI_HOST=127.0.0.1" in env_str
 
-    def test_custom_image_mounts_amneziawg_data(self) -> None:
-        """Custom image mode should mount data to /etc/amneziawg."""
+    def test_amneziawg_mounts_data_dir(self) -> None:
+        """amneziawg should mount data to /etc/amneziawg."""
         config = DeployConfig(
             domain="vpn.example.com",
             awg_listen_port=34567,
-            use_custom_awg_image=True,
         )
         parsed = yaml.safe_load(generate_compose(config))
         volumes = parsed["services"]["amneziawg"]["volumes"]
         assert any("/etc/amneziawg" in str(v) for v in volumes), (
-            "Custom image must mount data to /etc/amneziawg"
+            "Must mount data to /etc/amneziawg"
         )
 
-    def test_official_image_mounts_wireguard_data(self) -> None:
-        """Official image mode should mount data to /etc/wireguard."""
+    def test_amneziawg_with_obfuscation_params(self) -> None:
+        """amneziawg should include obfuscation env vars when provided."""
         config = DeployConfig(
             domain="vpn.example.com",
             awg_listen_port=34567,
-            use_custom_awg_image=False,
-        )
-        parsed = yaml.safe_load(generate_compose(config))
-        volumes = parsed["services"]["amneziawg"]["volumes"]
-        assert any("/etc/wireguard" in str(v) for v in volumes), (
-            "Official image must mount data to /etc/wireguard"
-        )
-
-    def test_custom_image_with_obfuscation_params(self) -> None:
-        """Custom image mode should still include obfuscation env vars."""
-        config = DeployConfig(
-            domain="vpn.example.com",
-            awg_listen_port=34567,
-            use_custom_awg_image=True,
             awg_obfuscation=AwgObfuscation(
                 s1=30, s2=80, s3=40, s4=100,
                 h1=100, h2=200, h3=300, h4=400,
@@ -511,57 +494,17 @@ class TestComposeCustomAwgImage:
         assert "AWG_S4=100" in awg_env
         assert "AWG_I5=50" in awg_env
 
-    def test_custom_image_retains_capabilities(self) -> None:
-        """Custom image mode must still have NET_ADMIN, SYS_MODULE, host network."""
+    def test_amneziawg_retains_capabilities(self) -> None:
+        """amneziawg must have NET_ADMIN, SYS_MODULE, host network."""
         config = DeployConfig(
             domain="vpn.example.com",
             awg_listen_port=34567,
-            use_custom_awg_image=True,
         )
         parsed = yaml.safe_load(generate_compose(config))
         awg = parsed["services"]["amneziawg"]
         assert awg["network_mode"] == "host"
         assert "NET_ADMIN" in awg["cap_add"]
         assert "SYS_MODULE" in awg["cap_add"]
-
-
-class TestComposeAwgFallbackLogic:
-    """Verify the fallback logic functions in compose.py."""
-
-    def test_enable_custom_awg_fallback_returns_new_config(self) -> None:
-        """enable_custom_awg_fallback returns a new config with flag set."""
-        from vpn007.compose import enable_custom_awg_fallback
-
-        config = DeployConfig(domain="vpn.example.com", awg_listen_port=34567)
-        assert config.use_custom_awg_image is False
-        new_config = enable_custom_awg_fallback(config)
-        assert new_config.use_custom_awg_image is True
-        # Original must be unchanged
-        assert config.use_custom_awg_image is False
-
-    def test_enable_custom_awg_fallback_preserves_other_fields(self) -> None:
-        """enable_custom_awg_fallback preserves all other config fields."""
-        from vpn007.compose import enable_custom_awg_fallback
-
-        config = DeployConfig(
-            domain="vpn.example.com",
-            awg_listen_port=34567,
-            enable_port_8443=True,
-            tailscale_auth_key="tskey-auth-test",
-        )
-        new_config = enable_custom_awg_fallback(config)
-        assert new_config.domain == "vpn.example.com"
-        assert new_config.awg_listen_port == 34567
-        assert new_config.enable_port_8443 is True
-        assert new_config.tailscale_auth_key == "tskey-auth-test"
-
-    def test_check_and_fallback_triggers_on_missing_container(self) -> None:
-        """check_and_fallback_awg triggers fallback when container doesn't exist."""
-        from vpn007.compose import check_and_fallback_awg
-
-        config = DeployConfig(domain="vpn.example.com", awg_listen_port=34567)
-        result = check_and_fallback_awg(config, container_name="nonexistent_container_xyz")
-        assert result.use_custom_awg_image is True
 
 
 # ---------------------------------------------------------------------------

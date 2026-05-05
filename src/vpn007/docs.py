@@ -60,7 +60,6 @@ def _build_template_context(config: DeployConfig) -> dict:
         "awg_listen_port": config.awg_listen_port,
         "awg_obfuscation": config.awg_obfuscation,
         "awg_panel_port": config.awg_panel_port,
-        "use_custom_awg_image": config.use_custom_awg_image,
         # Tailscale
         "tailscale_auth_key": config.tailscale_auth_key,
         # Multi-IP

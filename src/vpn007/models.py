@@ -144,7 +144,6 @@ class DeployConfig:
     awg_listen_port: int | None = None
     awg_obfuscation: AwgObfuscation | None = None
     awg_panel_port: int = 51821
-    use_custom_awg_image: bool = False  # Fallback: build from Dockerfile.amneziawg
 
     # Tailscale
     tailscale_auth_key: str | None = None

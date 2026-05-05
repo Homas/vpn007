@@ -121,7 +121,7 @@ def provision_awg_peer(
     sections, plus AWG obfuscation parameters when present.
 
     In production, this is called post-deployment after containers are
-    healthy, and the peer is registered via the running wg-easy API.
+    healthy, and the peer is registered via the running AmneziaWG web panel API.
     This function generates the client-side configuration.
 
     Parameters

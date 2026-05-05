@@ -1,14 +1,16 @@
 # Dockerfile.amneziawg — Custom AmneziaWG 2.0 image build
 #
 # This Dockerfile builds a custom Docker image with:
+#   - amneziawg-go 2.0 userspace daemon (from official amneziavpn/amneziawg-go image)
 #   - amneziawg-tools 2.0 (from amnezia-vpn/amneziawg-tools)
-#   - amneziawg-go 2.0 (from amnezia-vpn/amneziawg-go)
 #   - A lightweight web panel for peer management
 #
-# Used as a fallback when the official ghcr.io/wg-easy/wg-easy image
-# does not support the full AmneziaWG 2.0 parameter set (S3, S4, H-ranges, I1-I5).
+# The official ghcr.io/wg-easy/wg-easy image does not support the full
+# AmneziaWG 2.0 parameter set (S3, S4, H-ranges, I1-I5), so this custom
+# image is always used. The amneziawg-go userspace implementation is used
+# instead of a kernel module for maximum portability.
 #
-# See Requirements 4.3, 4.4 in the spec for details.
+# Base image: https://hub.docker.com/r/amneziavpn/amneziawg-go
 #
 # Copyright (c) Vadim Pavlov 2026. Licensed under GPL-3.0.
 
@@ -29,20 +31,7 @@ WORKDIR /src/amneziawg-tools/src
 RUN make && make install DESTDIR=/out
 
 # ---------------------------------------------------------------------------
-# Stage 2: Build amneziawg-go (userspace implementation) from source
-# ---------------------------------------------------------------------------
-FROM golang:1.22-alpine AS go-builder
-
-RUN apk add --no-cache git
-
-RUN git clone --depth 1 --branch v2.0.0 \
-        https://github.com/amnezia-vpn/amneziawg-go.git /src/amneziawg-go
-
-WORKDIR /src/amneziawg-go
-RUN go build -o /out/amneziawg-go ./cmd/amneziawg-go
-
-# ---------------------------------------------------------------------------
-# Stage 3: Build lightweight web panel
+# Stage 2: Build lightweight web panel
 # ---------------------------------------------------------------------------
 FROM golang:1.22-alpine AS panel-builder
 
@@ -55,14 +44,15 @@ WORKDIR /src/amneziawg-install/amneziawg-web
 RUN go build -o /out/awg-web .
 
 # ---------------------------------------------------------------------------
-# Stage 4: Final minimal runtime image
+# Stage 3: Final runtime image based on official amneziawg-go
 # ---------------------------------------------------------------------------
-FROM alpine:3.20
+FROM amneziavpn/amneziawg-go:latest
 
 LABEL maintainer="Vadim Pavlov" \
       description="AmneziaWG 2.0 with userspace implementation and web panel" \
       license="GPL-3.0"
 
+# Install runtime dependencies (the base image is minimal)
 RUN apk add --no-cache \
         bash \
         iptables \
@@ -75,9 +65,6 @@ RUN apk add --no-cache \
 # Copy amneziawg-tools (awg, awg-quick)
 COPY --from=tools-builder /out/usr/bin/awg /usr/bin/awg
 COPY --from=tools-builder /out/usr/bin/awg-quick /usr/bin/awg-quick
-
-# Copy amneziawg-go userspace implementation
-COPY --from=go-builder /out/amneziawg-go /usr/bin/amneziawg-go
 
 # Copy web panel binary
 COPY --from=panel-builder /out/awg-web /usr/bin/awg-web

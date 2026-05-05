@@ -43,16 +43,9 @@ services:
       vpn_net:
         ipv4_address: 172.20.0.3
 
-  # --- AmneziaWG 2.0 VPN + Panel ---
+  # --- AmneziaWG 2.0 VPN + Panel (wg-easy with AmneziaWG 2.0 support) ---
   amneziawg:
-{% if use_custom_awg_image %}
-    build:
-      context: .
-      dockerfile: Dockerfile.amneziawg
-    image: vpn007/amneziawg:2.0
-{% else %}
     image: ghcr.io/wg-easy/wg-easy:15
-{% endif %}
     container_name: vpn007_amneziawg
     restart: unless-stopped
     network_mode: host
@@ -63,23 +56,13 @@ services:
       - /dev/net/tun:/dev/net/tun
     volumes:
       - /lib/modules:/lib/modules:ro
-{% if use_custom_awg_image %}
-      - ./data/amneziawg:/etc/amneziawg
-{% else %}
       - ./data/amneziawg:/etc/wireguard
-{% endif %}
     environment:
-{% if not use_custom_awg_image %}
-      - EXPERIMENTAL_AWG=true
-      - OVERRIDE_AUTO_AWG=awg
-{% endif %}
       - WG_HOST={{ domain }}
       - WG_PORT={{ awg_listen_port }}
       - PORT={{ awg_panel_port }}
-{% if not use_custom_awg_image %}
       - WG_DEFAULT_ADDRESS=10.8.0.x
       - WG_DEFAULT_DNS=1.1.1.1
-{% endif %}
       - WEBUI_HOST=127.0.0.1
 {% if awg_obfuscation %}
       - AWG_S1={{ awg_obfuscation.s1 }}

@@ -179,10 +179,9 @@ def generate_all(config: DeployConfig) -> dict[str, str]:
     files["docker-compose.yml"] = compose_content
     _write_file(output_dir / "docker-compose.yml", compose_content)
 
-    # 2b. Copy AmneziaWG custom image build files if fallback is enabled
-    if config.use_custom_awg_image:
-        logger.info("Copying Dockerfile.amneziawg and entrypoint script...")
-        _copy_awg_build_files(output_dir, files)
+    # 2b. Copy AmneziaWG 2.0 custom image build files
+    logger.info("Copying Dockerfile.amneziawg and entrypoint script...")
+    _copy_awg_build_files(output_dir, files)
 
     # 3. Nginx stream config (L4)
     logger.info("Generating nginx/stream.conf...")
