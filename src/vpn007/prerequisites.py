@@ -33,7 +33,7 @@ SUPPORTED_OS: dict[str, tuple[int, ...]] = {
 REQUIRED_DEPENDENCIES: dict[str, tuple[str, str, list[str]]] = {
     "docker": ("docker", "20.10.0", ["docker", "--version"]),
     "docker-compose": ("docker", "2.0.0", ["docker", "compose", "version"]),
-    "python3": ("python3", "3.14.0", ["python3", "--version"]),
+    "python3": ("python3", "3.12.0", ["python3", "--version"]),
     "nftables": ("nft", "0.9.0", ["nft", "--version"]),
     "curl": ("curl", "7.0.0", ["curl", "--version"]),
     "git": ("git", "2.0.0", ["git", "--version"]),

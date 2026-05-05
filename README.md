@@ -32,7 +32,7 @@ The tool also provisions an nftables firewall with AS/subnet blocking, sets up s
 
 | Dependency | Version | Purpose |
 |------------|---------|---------|
-| Python | 3.14+ | VPN007 runtime |
+| Python | 3.12+ | VPN007 runtime |
 | Docker Engine | Latest stable | Container runtime |
 | Docker Compose | v2+ (plugin) | Service orchestration |
 | nftables | System package | Firewall |
@@ -72,7 +72,7 @@ git clone https://github.com/Homas/vpn007.git
 cd vpn007
 
 # Create a virtual environment
-python3.14 -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 
 # Install the package

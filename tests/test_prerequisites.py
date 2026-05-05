@@ -313,7 +313,7 @@ class TestGetMissingDependencies:
         deps = {
             "docker": "24.0.7",
             "docker-compose": "2.24.5",
-            "python3": "3.12.0",
+            "python3": "3.11.0",
             "nftables": "1.0.6",
             "curl": "8.4.0",
             "git": "2.43.0",
