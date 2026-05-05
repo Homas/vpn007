@@ -141,6 +141,8 @@ _ENV_FIELD_MAP: list[tuple[str, str, type | object]] = [
     ("AWG_PANEL_PORT", "awg_panel_port", int),
     # Tailscale
     ("TAILSCALE_AUTH_KEY", "tailscale_auth_key", str),
+    ("TAILSCALE_HOSTNAME", "tailscale_hostname", str),
+    ("TAILSCALE_EXTRA_ARGS", "tailscale_extra_args", str),
     # Multi-IP
     ("INCOMING_IP", "incoming_ip", str),
     ("OUTGOING_IP", "outgoing_ip", str),

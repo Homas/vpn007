@@ -113,6 +113,8 @@ valid_deploy_config = st.builds(
     awg_panel_port=st.just(51821),
     use_custom_awg_image=st.booleans(),
     tailscale_auth_key=st.none() | st.from_regex(r"tskey-auth-[a-zA-Z0-9]{10,40}", fullmatch=True),
+    tailscale_hostname=st.none() | st.from_regex(r"[a-z][a-z0-9-]{2,20}", fullmatch=True),
+    tailscale_extra_args=st.just("--advertise-exit-node"),
     incoming_ip=st.none() | valid_ipv4,
     outgoing_ip=st.none() | valid_ipv4,
     public_ipv4=st.none() | valid_ipv4,

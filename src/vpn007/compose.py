@@ -128,6 +128,12 @@ def _build_template_context(config: DeployConfig) -> dict:
             if config.tailscale_auth_key
             else None
         ),
+        "tailscale_hostname": (
+            _yaml_safe(config.tailscale_hostname)
+            if config.tailscale_hostname
+            else None
+        ),
+        "tailscale_extra_args": _yaml_safe(config.tailscale_extra_args),
         # Cover site
         "cover_site_mode": config.cover_site_mode.value,
         "cover_site_url": config.cover_site_url,

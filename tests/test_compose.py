@@ -222,8 +222,8 @@ class TestProperty3ComposeServiceCompleteness:
         svc = parsed["services"]["three_x_ui"]
         volumes = svc.get("volumes", [])
         volume_strs = [str(v) for v in volumes]
-        assert any("three_x_ui_data" in v for v in volume_strs), (
-            "three_x_ui must mount the three_x_ui_data volume"
+        assert any("./data/three_x_ui:/etc/x-ui" in v for v in volume_strs), (
+            "three_x_ui must mount ./data/three_x_ui to /etc/x-ui"
         )
 
 

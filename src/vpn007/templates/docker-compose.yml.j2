@@ -17,8 +17,8 @@ services:
       - ./nginx/stream.conf:/etc/nginx/stream.conf:ro
       - ./nginx/http.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nginx/approved_panel_ips.conf:/etc/nginx/conf.d/approved_panel_ips.conf:ro
-      - letsencrypt:/etc/letsencrypt:ro
-      - certbot_webroot:/var/www/certbot:ro
+      - ./data/letsencrypt:/etc/letsencrypt:ro
+      - ./data/certbot_webroot:/var/www/certbot:ro
       - ./nginx/self-signed:/etc/nginx/self-signed:ro
     networks:
       vpn_net:
@@ -35,7 +35,7 @@ services:
     container_name: vpn007_three_x_ui
     restart: unless-stopped
     volumes:
-      - three_x_ui_data:/etc/x-ui
+      - ./data/three_x_ui:/etc/x-ui
       - ./xray/config.json:/etc/x-ui/xray.json:ro
     environment:
       - XUI_LOG_LEVEL=warn
@@ -64,9 +64,9 @@ services:
     volumes:
       - /lib/modules:/lib/modules:ro
 {% if use_custom_awg_image %}
-      - amneziawg_data:/etc/amneziawg
+      - ./data/amneziawg:/etc/amneziawg
 {% else %}
-      - amneziawg_data:/etc/wireguard
+      - ./data/amneziawg:/etc/wireguard
 {% endif %}
     environment:
 {% if not use_custom_awg_image %}
@@ -115,12 +115,16 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     volumes:
-      - tailscale_data:/var/lib/tailscale
+      - ./data/tailscale:/var/lib/tailscale
     environment:
       - TS_STATE_DIR=/var/lib/tailscale
 {% if tailscale_auth_key %}
       - TS_AUTHKEY={{ tailscale_auth_key }}
 {% endif %}
+{% if tailscale_hostname %}
+      - TS_HOSTNAME={{ tailscale_hostname }}
+{% endif %}
+      - TS_EXTRA_ARGS={{ tailscale_extra_args }}
 
   # --- Cover site (plausible deniability) ---
   cover_site:
@@ -142,20 +146,8 @@ services:
     profiles:
       - certbot
     volumes:
-      - letsencrypt:/etc/letsencrypt
-      - certbot_webroot:/var/www/certbot
-
-volumes:
-  three_x_ui_data:
-    name: vpn007_three_x_ui_data
-  amneziawg_data:
-    name: vpn007_amneziawg_data
-  tailscale_data:
-    name: vpn007_tailscale_data
-  letsencrypt:
-    name: vpn007_letsencrypt
-  certbot_webroot:
-    name: vpn007_certbot_webroot
+      - ./data/letsencrypt:/etc/letsencrypt
+      - ./data/certbot_webroot:/var/www/certbot
 
 networks:
   vpn_net:

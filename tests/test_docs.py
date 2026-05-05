@@ -88,7 +88,7 @@ class TestGenerateDocs:
         readme = docs["README.md"]
         assert "Docker Engine" in readme
         assert "Docker Compose" in readme
-        assert "Python" in readme and "3.14+" in readme
+        assert "Python" in readme and "3.12+" in readme
         assert "nftables" in readme
         assert "curl" in readme
         assert "git" in readme

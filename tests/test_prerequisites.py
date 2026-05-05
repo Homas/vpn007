@@ -73,8 +73,8 @@ class TestExtractVersion:
         assert _extract_version(output) == "24.0.7"
 
     def test_python_version_output(self) -> None:
-        output = "Python 3.14.0"
-        assert _extract_version(output) == "3.14.0"
+        output = "Python 3.12.0"
+        assert _extract_version(output) == "3.12.0"
 
     def test_nft_version_output(self) -> None:
         output = "nftables v1.0.6 (Lester Gooch #3)"
@@ -266,7 +266,7 @@ class TestGetMissingDependencies:
         deps = {
             "docker": "24.0.7",
             "docker-compose": "2.24.5",
-            "python3": "3.14.0",
+            "python3": "3.12.0",
             "nftables": "1.0.6",
             "curl": "8.4.0",
             "git": "2.43.0",
@@ -289,7 +289,7 @@ class TestGetMissingDependencies:
         deps = {
             "docker": "19.0.0",
             "docker-compose": "2.24.5",
-            "python3": "3.14.0",
+            "python3": "3.12.0",
             "nftables": "1.0.6",
             "curl": "8.4.0",
             "git": "2.43.0",
@@ -301,7 +301,7 @@ class TestGetMissingDependencies:
         deps = {
             "docker": None,
             "docker-compose": None,
-            "python3": "3.14.0",
+            "python3": "3.12.0",
             "nftables": None,
             "curl": "8.4.0",
             "git": "2.43.0",
@@ -566,7 +566,7 @@ class TestRunPrerequisiteChecks:
         return_value={
             "docker": "24.0.7",
             "docker-compose": "2.24.5",
-            "python3": "3.14.0",
+            "python3": "3.12.0",
             "nftables": "1.0.6",
             "curl": "8.4.0",
             "git": "2.43.0",
@@ -589,7 +589,7 @@ class TestRunPrerequisiteChecks:
         return_value={
             "docker": "24.0.7",
             "docker-compose": "2.24.5",
-            "python3": "3.14.0",
+            "python3": "3.12.0",
             "nftables": "1.0.6",
             "curl": "8.4.0",
             "git": "2.43.0",
@@ -611,7 +611,7 @@ class TestRunPrerequisiteChecks:
         return_value={
             "docker": "24.0.7",
             "docker-compose": "2.24.5",
-            "python3": "3.14.0",
+            "python3": "3.12.0",
             "nftables": "1.0.6",
             "curl": "8.4.0",
             "git": "2.43.0",
@@ -639,7 +639,7 @@ class TestRunPrerequisiteChecks:
         return_value={
             "docker": "24.0.7",
             "docker-compose": "2.24.5",
-            "python3": "3.14.0",
+            "python3": "3.12.0",
             "nftables": "1.0.6",
             "curl": "8.4.0",
             "git": "2.43.0",
@@ -666,7 +666,7 @@ class TestRunPrerequisiteChecks:
         return_value={
             "docker": "24.0.7",
             "docker-compose": "2.24.5",
-            "python3": "3.14.0",
+            "python3": "3.12.0",
             "nftables": "1.0.6",
             "curl": None,
             "git": None,
@@ -696,7 +696,7 @@ class TestRunPrerequisiteChecks:
         return_value={
             "docker": "24.0.7",
             "docker-compose": "2.24.5",
-            "python3": "3.14.0",
+            "python3": "3.12.0",
             "nftables": "1.0.6",
             "curl": None,
             "git": "2.43.0",
@@ -718,7 +718,7 @@ class TestRunPrerequisiteChecks:
         return_value={
             "docker": "24.0.7",
             "docker-compose": "2.24.5",
-            "python3": "3.14.0",
+            "python3": "3.12.0",
             "nftables": "1.0.6",
             "curl": "8.4.0",
             "git": "2.43.0",

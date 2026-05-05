@@ -128,6 +128,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Tailscale auth key for automatic node registration",
     )
+    ts.add_argument(
+        "--tailscale-hostname",
+        default=None,
+        help="Hostname for this node in the tailnet",
+    )
+    ts.add_argument(
+        "--tailscale-extra-args",
+        default=None,
+        help="Extra arguments for Tailscale daemon (default: --advertise-exit-node)",
+    )
 
     # -- Multi-IP ----------------------------------------------------------
     ip = parser.add_argument_group("multi-ip")

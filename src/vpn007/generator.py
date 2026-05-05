@@ -36,6 +36,11 @@ _OUTPUT_SUBDIRS: list[str] = [
     "systemd",
     "docs",
     "clients",
+    "data/three_x_ui",
+    "data/amneziawg",
+    "data/tailscale",
+    "data/letsencrypt",
+    "data/certbot_webroot",
 ]
 
 
@@ -84,6 +89,37 @@ def _create_output_dirs(output_dir: Path) -> None:
     for subdir in _OUTPUT_SUBDIRS:
         (output_dir / subdir).mkdir(parents=True, exist_ok=True)
     logger.info("Created output directory structure at %s", output_dir)
+
+
+def _copy_awg_build_files(output_dir: Path, files: dict[str, str]) -> None:
+    """Copy AmneziaWG custom image build files to the output directory.
+
+    Copies ``Dockerfile.amneziawg`` and ``docker-entrypoint-awg.sh`` from
+    the project root into the output directory so that
+    ``docker compose build amneziawg`` works from the deploy directory.
+    """
+    import shutil
+
+    # Locate project root (where Dockerfile.amneziawg lives)
+    project_root = Path(__file__).parent.parent.parent
+
+    dockerfile_src = project_root / "Dockerfile.amneziawg"
+    entrypoint_src = project_root / "docker-entrypoint-awg.sh"
+
+    for src, filename in [
+        (dockerfile_src, "Dockerfile.amneziawg"),
+        (entrypoint_src, "docker-entrypoint-awg.sh"),
+    ]:
+        if src.is_file():
+            content = src.read_text(encoding="utf-8")
+            files[filename] = content
+            _write_file(output_dir / filename, content)
+        else:
+            logger.warning(
+                "AmneziaWG build file not found: %s — "
+                "custom image build may fail.",
+                src,
+            )
 
 
 def _write_file(path: Path, content: str) -> None:
@@ -142,6 +178,11 @@ def generate_all(config: DeployConfig) -> dict[str, str]:
     compose_content = generate_compose(config)
     files["docker-compose.yml"] = compose_content
     _write_file(output_dir / "docker-compose.yml", compose_content)
+
+    # 2b. Copy AmneziaWG custom image build files if fallback is enabled
+    if config.use_custom_awg_image:
+        logger.info("Copying Dockerfile.amneziawg and entrypoint script...")
+        _copy_awg_build_files(output_dir, files)
 
     # 3. Nginx stream config (L4)
     logger.info("Generating nginx/stream.conf...")
@@ -319,6 +360,11 @@ def generate_deployment_summary(
         lines.append("Approved Panel IPs:")
         for ip in config.approved_ips:
             lines.append(f"  {ip}")
+        lines.append("")
+    if config.approved_hostnames:
+        lines.append("Approved Panel Hostnames:")
+        for hostname in config.approved_hostnames:
+            lines.append(f"  {hostname}")
         lines.append("")
     lines.append("=" * 60)
     lines.append("")

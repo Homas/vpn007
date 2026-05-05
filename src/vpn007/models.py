@@ -148,6 +148,8 @@ class DeployConfig:
 
     # Tailscale
     tailscale_auth_key: str | None = None
+    tailscale_hostname: str | None = None  # TS_HOSTNAME for tailnet identity
+    tailscale_extra_args: str = "--advertise-exit-node"  # TS_EXTRA_ARGS
 
     # Multi-IP
     incoming_ip: str | None = None
