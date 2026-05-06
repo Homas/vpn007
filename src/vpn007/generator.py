@@ -264,21 +264,37 @@ def generate_all(config: DeployConfig) -> dict[str, str]:
         files[rel_path] = doc_content
         _write_file(output_dir / "docs" / doc_name, doc_content)
 
-    # 13. Xray client provisioning
-    logger.info("Provisioning initial Xray client...")
-    xray_client = provision_xray_client(config, client_name=config.xray_initial_client)
-    client_filename = f"xray-{xray_client.client_name}.txt"
-    client_content = xray_client.vless_share_link + "\n"
-    files[f"clients/{client_filename}"] = client_content
-    _write_file(output_dir / "clients" / client_filename, client_content)
+    # 13. Xray client provisioning (skip if already exists — preserves keys on re-deploy)
+    xray_client_path = output_dir / "clients" / f"xray-{config.xray_initial_client}.txt"
+    if xray_client_path.exists():
+        logger.info(
+            "Xray client config already exists at %s — skipping (preserving keys).",
+            xray_client_path,
+        )
+    else:
+        logger.info("Provisioning initial Xray client...")
+        xray_client = provision_xray_client(
+            config, client_name=config.xray_initial_client
+        )
+        client_filename = f"xray-{xray_client.client_name}.txt"
+        client_content = xray_client.vless_share_link + "\n"
+        files[f"clients/{client_filename}"] = client_content
+        _write_file(xray_client_path, client_content)
 
-    # 14. AmneziaWG peer provisioning
-    logger.info("Provisioning initial AmneziaWG peer...")
-    awg_peer = provision_awg_peer(config, peer_name=config.awg_initial_peer)
-    awg_filename = f"awg-{awg_peer.peer_name}.conf"
-    awg_content = awg_peer.conf_content + "\n"
-    files[f"clients/{awg_filename}"] = awg_content
-    _write_file(output_dir / "clients" / awg_filename, awg_content)
+    # 14. AmneziaWG peer provisioning (skip if already exists — preserves keys on re-deploy)
+    awg_peer_path = output_dir / "clients" / f"awg-{config.awg_initial_peer}.conf"
+    if awg_peer_path.exists():
+        logger.info(
+            "AmneziaWG peer config already exists at %s — skipping (preserving keys).",
+            awg_peer_path,
+        )
+    else:
+        logger.info("Provisioning initial AmneziaWG peer...")
+        awg_peer = provision_awg_peer(config, peer_name=config.awg_initial_peer)
+        awg_filename = f"awg-{awg_peer.peer_name}.conf"
+        awg_content = awg_peer.conf_content + "\n"
+        files[f"clients/{awg_filename}"] = awg_content
+        _write_file(awg_peer_path, awg_content)
 
     logger.info(
         "Generated %d files in %s", len(files), output_dir,
