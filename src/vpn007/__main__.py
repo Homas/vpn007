@@ -238,7 +238,20 @@ def main(argv: list[str] | None = None) -> int:
         logger.debug("Last error: %s", exc)
         return EXIT_DOCKER_ERROR
 
-    # 6e. Acquire TLS certificate
+    # 6e. Apply firewall rules (before certbot — certbot needs to punch a hole)
+    logger.info("Applying firewall rules...")
+    nftables_path = config.output_dir / "nftables.conf"
+    try:
+        apply_nftables(nftables_path)
+        persist_nftables(nftables_path)
+        verify_firewall_rules()
+    except DeployError as exc:
+        logger.error("Firewall provisioning failed: %s", exc.message)
+        if exc.remediation:
+            logger.info("Remediation: %s", exc.remediation)
+        return EXIT_SYSTEM_ERROR
+
+    # 6f. Acquire TLS certificate
     logger.info("Acquiring TLS certificate...")
     if config.skip_certbot:
         logger.info("SKIP_CERTBOT is set — keeping self-signed certificate.")
@@ -252,20 +265,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             logger.info("You can retry manually: %s", exc.remediation or "")
 
-    # 6e. Apply firewall rules
-    logger.info("Applying firewall rules...")
-    nftables_path = config.output_dir / "nftables.conf"
-    try:
-        apply_nftables(nftables_path)
-        persist_nftables(nftables_path)
-        verify_firewall_rules()
-    except DeployError as exc:
-        logger.error("Firewall provisioning failed: %s", exc.message)
-        if exc.remediation:
-            logger.info("Remediation: %s", exc.remediation)
-        return EXIT_SYSTEM_ERROR
-
-    # 6f. Install systemd timers
+    # 6g. Install systemd timers
     logger.info("Installing systemd timers...")
     systemd_dir = config.output_dir / "systemd"
     try:
@@ -276,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
             logger.info("Remediation: %s", exc.remediation)
         return EXIT_SYSTEM_ERROR
 
-    # 6g. Provision AmneziaWG kernel module (non-fatal — falls back to userspace)
+    # 6h. Provision AmneziaWG kernel module (non-fatal — falls back to userspace)
     logger.info("Provisioning AmneziaWG kernel module...")
     kernel_module_loaded = provision_awg_kernel_module(distro)
     if not kernel_module_loaded:
@@ -290,7 +290,7 @@ def main(argv: list[str] | None = None) -> int:
                 "Userspace fallback failed (non-fatal): %s", exc.message
             )
 
-    # 6h. Run smoke tests
+    # 6i. Run smoke tests
     logger.info("Running smoke tests...")
     test_results = smoke_test(config)
     all_passed = all(test_results.values())
