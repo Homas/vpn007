@@ -2,7 +2,13 @@
 {# © Vadim Pavlov 2026 #}
 #!/usr/sbin/nft -f
 
-flush ruleset
+# Flush only VPN007-managed tables (preserve Docker's iptables-nft chains)
+table inet filter
+delete table inet filter
+{% if outgoing_ip %}
+table ip nat
+delete table ip nat
+{% endif %}
 
 table inet filter {
     set blocked_v4 {
