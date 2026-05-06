@@ -171,6 +171,14 @@ _ENV_FIELD_MAP: list[tuple[str, str, type | object]] = [
     ("FORWARDING_PORTS", "forwarding_ports", _parse_port_forwards),
     ("RECONNECT_INITIAL_DELAY_SEC", "reconnect_initial_delay_sec", int),
     ("RECONNECT_MAX_DELAY_SEC", "reconnect_max_delay_sec", int),
+    ("TUNNEL_SUBNET", "tunnel_subnet", str),
+    # Exit node role
+    ("EXIT_NODE_ENABLED", "exit_node_enabled", _parse_bool),
+    ("EXIT_NODE_TUNNEL_TYPE", "exit_node_tunnel_type", _parse_tunnel_type),
+    ("EXIT_NODE_PEER_IP", "exit_node_peer_ip", str),
+    ("EXIT_NODE_TUNNEL_SUBNET", "exit_node_tunnel_subnet", str),
+    ("EXIT_NODE_LISTEN_PORT", "exit_node_listen_port", int),
+    ("EXIT_NODE_REVERSE_INITIATED", "exit_node_reverse_initiated", _parse_bool),
     # Initial clients
     ("XRAY_INITIAL_CLIENT", "xray_initial_client", str),
     ("AWG_INITIAL_PEER", "awg_initial_peer", str),

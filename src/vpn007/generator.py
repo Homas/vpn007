@@ -19,6 +19,7 @@ from vpn007.blocklist import generate_blocklist_updater
 from vpn007.clients import provision_xray_client
 from vpn007.compose import generate_compose
 from vpn007.docs import generate_docs
+from vpn007.exit_node import generate_exit_node_configs
 from vpn007.firewall import generate_nftables_config
 from vpn007.forwarding import generate_forwarding_script
 from vpn007.hostname_resolver import generate_hostname_resolver
@@ -36,6 +37,7 @@ _OUTPUT_SUBDIRS: list[str] = [
     "systemd",
     "docs",
     "clients",
+    "exit-node",
     "data/three_x_ui",
     "data/amneziawg",
     "data/tailscale",
@@ -245,6 +247,14 @@ def generate_all(config: DeployConfig) -> dict[str, str]:
         fwd_script = generate_forwarding_script(config)
         files["forwarding-install.py"] = fwd_script
         _write_file(output_dir / "forwarding-install.py", fwd_script)
+
+    # 11b. Exit node role configs (only when enabled)
+    if config.exit_node_enabled:
+        logger.info("Generating exit-node role configuration...")
+        exit_node_files = generate_exit_node_configs(config)
+        for rel_path, content in exit_node_files.items():
+            files[rel_path] = content
+            _write_file(output_dir / rel_path, content)
 
     # 12. Documentation
     logger.info("Generating documentation...")

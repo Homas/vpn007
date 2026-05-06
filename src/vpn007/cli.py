@@ -272,6 +272,45 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Maximum reconnection delay in seconds (default: 300)",
     )
+    fwd.add_argument(
+        "--tunnel-subnet",
+        default=None,
+        help="Tunnel subnet for inter-VM WireGuard link (default: 10.99.0.0/30)",
+    )
+
+    # -- Exit node role ----------------------------------------------------
+    exit_node = parser.add_argument_group("exit node role")
+    exit_node.add_argument(
+        "--exit-node-enabled",
+        default=None,
+        help="Enable exit node role: accept forwarded traffic from another node (true/false)",
+    )
+    exit_node.add_argument(
+        "--exit-node-tunnel-type",
+        default=None,
+        help="Tunnel type for exit node role: wireguard, ssh, or tailscale",
+    )
+    exit_node.add_argument(
+        "--exit-node-peer-ip",
+        default=None,
+        help="IP of the peer VM that forwards traffic to this exit node",
+    )
+    exit_node.add_argument(
+        "--exit-node-tunnel-subnet",
+        default=None,
+        help="Tunnel subnet for exit node role (default: 10.99.1.0/30)",
+    )
+    exit_node.add_argument(
+        "--exit-node-listen-port",
+        type=int,
+        default=None,
+        help="WireGuard listen port for exit node tunnel (default: 51822)",
+    )
+    exit_node.add_argument(
+        "--exit-node-reverse-initiated",
+        default=None,
+        help="Peer VM initiates the tunnel connection to this exit node (true/false)",
+    )
 
     # -- Output ------------------------------------------------------------
     output = parser.add_argument_group("output")

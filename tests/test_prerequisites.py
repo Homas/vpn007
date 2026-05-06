@@ -520,7 +520,7 @@ class TestCheckSystemResources:
             stdout="Avail\n21474836480\n",
         )
         warnings = check_system_resources()
-        assert any("Insufficient RAM" in w for w in warnings)
+        assert any("Low RAM" in w for w in warnings)
 
     @patch("vpn007.prerequisites.subprocess.run")
     @patch("vpn007.prerequisites.Path.read_text", return_value=_MEMINFO_4GB)

@@ -182,6 +182,16 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("Checking prerequisites...")
     # TODO: prerequisites.check_all(config)
 
+    # Auto-provision swap on low-memory systems (≤1.5 GB RAM, no existing swap)
+    from vpn007.system_ops import provision_swap_if_needed
+
+    try:
+        if provision_swap_if_needed():
+            logger.info("Swap auto-provisioned for low-memory system.")
+    except DeployError as exc:
+        logger.warning("Swap provisioning failed (non-fatal): %s", exc.message)
+        logger.info("Continuing without swap. %s", exc.remediation or "")
+
     logger.info("Starting containers...")
     # TODO: docker_ops.compose_up(...)
 

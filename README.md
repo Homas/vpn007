@@ -6,6 +6,53 @@ VPN007 generates all the configuration files needed to run Xray (VLESS+Reality),
 
 The tool also provisions an nftables firewall with AS/subnet blocking, sets up systemd timers for blocklist updates and hostname resolution, manages TLS certificates via Let's Encrypt, and can generate forwarding scripts for multi-VM relay architectures.
 
+## Table of contents
+
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Run modes](#run-modes)
+  - [Quick start](#quick-start)
+  - [Deploying to a remote server without source code](#deploying-to-a-remote-server-without-source-code)
+  - [CLI options](#cli-options)
+  - [Configuration precedence](#configuration-precedence)
+  - [Input validation](#input-validation)
+  - [Generated output structure](#generated-output-structure)
+  - [Docker containers](#docker-containers)
+  - [Common operations](#common-operations)
+  - [Firewall management script (`vpn007-fw.sh`)](#firewall-management-script-vpn007-fwsh)
+  - [TLS certificate management](#tls-certificate-management)
+  - [Lab/staging deployment](#labstaging-deployment)
+  - [Low-memory deployment (1 GB RAM)](#low-memory-deployment-1-gb-ram)
+  - [SSH access security](#ssh-access-security)
+  - [Brute-force protection](#brute-force-protection)
+  - [Admin credentials](#admin-credentials)
+- [Inter-VM forwarding (relay architecture)](#inter-vm-forwarding-relay-architecture)
+  - [Supported tunnel types](#supported-tunnel-types)
+  - [Step 1: Configure VM-A](#step-1-configure-vm-a-entrance-node)
+  - [Step 2: Prepare VM-B](#step-2-prepare-vm-b-exit-node)
+  - [Step 3: Run the forwarding script on VM-B](#step-3-run-the-forwarding-script-on-vm-b)
+  - [Step 4: Verify the tunnel](#step-4-verify-the-tunnel)
+  - [Reverse-initiated connections](#reverse-initiated-connections)
+  - [Dual-role: VM as both VPN node and exit node](#dual-role-vm-as-both-vpn-node-and-exit-node)
+- [Backup and restore](#backup-and-restore)
+- [Upgrading](#upgrading)
+- [IPv6 support](#ipv6-support)
+- [Health checks and monitoring](#health-checks-and-monitoring)
+- [Log management](#log-management)
+- [Kernel parameters](#kernel-parameters)
+- [CLI reference](#cli-reference)
+- [Running tests](#running-tests)
+- [Uninstalling VPN007](#uninstalling-vpn007)
+- [Rollback](#rollback)
+- [Container resource limits](#container-resource-limits)
+- [Docker network isolation](#docker-network-isolation)
+- [Web panel rate limiting](#web-panel-rate-limiting)
+- [Security hardening (AppArmor)](#security-hardening-apparmor)
+- [Credits](#credits)
+- [License](#license)
+
 ## Features
 
 - **Xray VLESS+Reality** — VPN traffic indistinguishable from legitimate TLS 1.3 connections
@@ -58,11 +105,11 @@ Dev dependencies (for running tests):
 
 ### Hardware
 
-| Resource | Minimum | Recommended |
-|----------|---------|-------------|
-| CPU | 1 vCPU | 2+ vCPU |
-| RAM | 2 GB | 4 GB |
-| Disk | 15 GB | 30 GB |
+| Resource | Bare minimum | Minimum | Recommended |
+|----------|--------------|---------|-------------|
+| CPU | 1 vCPU | 1 vCPU | 2+ vCPU |
+| RAM | 1 GB — up to 10 clients (swap auto-provisioned) | 2 GB — up to 20-30 clients | 4 GB — many concurrent clients |
+| Disk | 15 GB | 15 GB | 30 GB |
 
 Disk usage grows with VPN client count, Docker image layers, and log retention. Additional resources are needed when inter-VM forwarding is enabled.
 
@@ -184,7 +231,7 @@ Reality key pair (private key, public key, short_id) is auto-generated at deploy
 
 | Flag | Env var | Default | Description |
 |------|---------|---------|-------------|
-| `--awg-listen-port` | `AWG_LISTEN_PORT` | random 10000-65535 | UDP listen port on host |
+| `--awg-listen-port` | `AWG_LISTEN_PORT` | *(random 10000-65535)* | UDP listen port on host (randomized to avoid DPI fingerprinting on standard port 51820) |
 | `--awg-panel-port` | `AWG_PANEL_PORT` | `51821` | Web panel port (local-only) |
 
 Obfuscation parameters (env vars only — provide all or none for auto-generation):
@@ -296,6 +343,20 @@ When both `SSH_APPROVED_IPS` and `SSH_APPROVED_HOSTNAMES` are empty, SSH is open
 | `--forwarding-ports` | `FORWARDING_PORTS` | *(none)* | Port forwards (`proto:listen:fwd[:desc],...`) |
 | `--reconnect-initial-delay-sec` | `RECONNECT_INITIAL_DELAY_SEC` | `5` | Initial reconnect delay (seconds) |
 | `--reconnect-max-delay-sec` | `RECONNECT_MAX_DELAY_SEC` | `300` | Max reconnect delay (seconds) |
+| `--tunnel-subnet` | `TUNNEL_SUBNET` | `10.99.0.0/30` | WireGuard tunnel subnet |
+
+#### Exit node role
+
+When a VM runs the full VPN007 stack AND also serves as an exit node for another VPN007 instance, enable the exit node role. This creates a separate tunnel and nftables table that coexists with the main VPN stack without interference.
+
+| Flag | Env var | Default | Description |
+|------|---------|---------|-------------|
+| `--exit-node-enabled` | `EXIT_NODE_ENABLED` | `false` | Accept forwarded traffic from another VPN007 node |
+| `--exit-node-tunnel-type` | `EXIT_NODE_TUNNEL_TYPE` | *(none)* | Tunnel type: `wireguard`, `ssh`, or `tailscale` |
+| `--exit-node-peer-ip` | `EXIT_NODE_PEER_IP` | *(none)* | IP of the peer VM forwarding traffic to us |
+| `--exit-node-tunnel-subnet` | `EXIT_NODE_TUNNEL_SUBNET` | `10.99.1.0/30` | Tunnel subnet (must differ from `TUNNEL_SUBNET`) |
+| `--exit-node-listen-port` | `EXIT_NODE_LISTEN_PORT` | `51822` | WireGuard listen port for exit-node tunnel |
+| `--exit-node-reverse-initiated` | `EXIT_NODE_REVERSE_INITIATED` | `false` | Peer initiates tunnel to this exit node |
 
 #### Initial clients
 
@@ -343,6 +404,9 @@ The deployer validates all parameters at startup and exits with a clear error me
 | `TUNNEL_TYPE` | Must be `wireguard`, `ssh`, or `tailscale` when `FORWARDING_ENABLED=true` |
 | `SECONDARY_VM_IP` | Required when `FORWARDING_ENABLED=true` |
 | `FORWARDING_PORTS` | Required when `FORWARDING_ENABLED=true`; format `proto:port:port[:desc]` |
+| `EXIT_NODE_TUNNEL_TYPE` | Required when `EXIT_NODE_ENABLED=true` |
+| `EXIT_NODE_PEER_IP` | Required when `EXIT_NODE_ENABLED=true`; valid IP address |
+| `EXIT_NODE_TUNNEL_SUBNET` | Must differ from `TUNNEL_SUBNET` when both are enabled |
 | `APPROVED_IPS`, `SSH_APPROVED_IPS` | Valid IPv4/IPv6 addresses or CIDR notation |
 | `BLOCKED_AS_NUMBERS` | Must match `AS<digits>` format |
 
@@ -387,6 +451,17 @@ deploy/
 │   ├── troubleshooting.md
 │   └── client-guides.md
 └── forwarding-install.py       # (only when forwarding enabled)
+```
+
+When `EXIT_NODE_ENABLED=true`, an additional directory is generated:
+
+```
+deploy/
+└── exit-node/
+    ├── wg-exit-node.conf           # WireGuard config for exit-node tunnel
+    ├── nftables-exit-node.conf     # Separate nftables table for exit-node NAT
+    ├── exit-node-public.key        # Public key to share with the peer VM
+    └── README.md                   # Setup instructions for this deployment
 ```
 
 All volume mounts in `docker-compose.yml` use relative paths (`./data/...`), so the output directory is portable — copy it anywhere and run `docker compose up -d`.
@@ -504,6 +579,14 @@ sudo vpn007-fw list blocked
 sudo vpn007-fw list ssh
 ```
 
+**Built-in help:**
+
+```bash
+vpn007-fw --help
+```
+
+This prints the full command reference, environment variables, and usage examples.
+
 Changes made via `vpn007-fw` are applied immediately and automatically saved to `/etc/nftables.conf` (loaded by `nftables.service` on boot). To override the save path, set the `VPN007_NFTABLES_CONF` environment variable.
 
 ### TLS certificate management
@@ -549,7 +632,11 @@ The full stack runs on 1 GB RAM for light usage (1-10 concurrent clients). Typic
 
 The 2 GB recommendation accounts for spikes during Docker image pulls, cert renewals, and many concurrent clients. To run comfortably on 1 GB:
 
-**1. Add swap (most impactful, no trade-off):**
+**1. Swap (auto-provisioned):**
+
+VPN007 automatically detects low-memory systems (≤1.5 GB RAM) during full deployment and provisions a 1 GB swapfile if no swap is configured. This is persisted in `/etc/fstab` so it survives reboots. No manual action needed.
+
+If you prefer to provision swap manually (e.g., during dry-run workflows or with a custom size):
 
 ```bash
 fallocate -l 1G /swapfile
@@ -636,8 +723,14 @@ During deployment, VPN007 generates random credentials for the 3x-ui web panel:
 
 These credentials are:
 1. Printed to the console during deployment (save them immediately)
-2. Written to the deployment log at `{output_dir}/deploy.log`
+2. Written to the deployment log at `{output_dir}/deploy.log` (file permissions set to `0600`)
 3. Stored in the 3x-ui database at `{output_dir}/data/three_x_ui/x-ui.db`
+
+The deployment log contains sensitive credentials and is created with `0600` permissions (owner read/write only). If you move or copy the log, preserve restrictive permissions:
+
+```bash
+chmod 600 deploy/deploy.log
+```
 
 To retrieve credentials after deployment:
 
@@ -673,7 +766,12 @@ This section explains how to set up a two-VM relay where **VM-A** (entrance node
 - **VM-B** is a lightweight exit node that receives forwarded traffic from VM-A over an encrypted tunnel and routes it to the internet.
 - The deployer generates a standalone Python script (`forwarding-install.py`) that you run on VM-B to set up its side of the tunnel.
 
-**Security note:** The generated `forwarding-install.py` contains embedded cryptographic keys (WireGuard private keys or SSH private keys). Transfer it to VM-B over a secure channel (SCP, SFTP, or via Tailscale). Delete the script from VM-B after successful installation — the keys are copied to their final locations during setup. Do not commit this file to version control or leave it on intermediate machines.
+**Security note:** The generated `forwarding-install.py` contains embedded cryptographic keys (WireGuard private keys or SSH private keys). Handle it with care:
+1. Transfer to VM-B over a secure channel only (SCP, SFTP, or via Tailscale)
+2. Set restrictive permissions before execution: `chmod 700 /root/forwarding-install.py`
+3. **Delete the script from VM-B after successful installation** — the keys are copied to their final locations during setup
+4. Do not commit this file to version control or leave it on intermediate machines
+5. If the script must be stored temporarily, ensure it is readable only by root (`0700`)
 
 ### Hardware requirements for VM-B (exit node)
 
@@ -1082,6 +1180,88 @@ After converting to single-node, ensure these are cleaned up:
 | forwarding-install.py on VM-B | — | Delete |
 | IP forwarding sysctl on VM-B | — | Set to 0 |
 
+### Dual-role: VM as both VPN node and exit node
+
+A VM can simultaneously run the full VPN007 stack (serving its own clients) AND act as an exit node for another VPN007 instance. This is useful when you have two VPN servers and want either one to serve as a backup exit for the other.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  VM-A (dual-role)                                                │
+│                                                                  │
+│  [VPN007 stack] ─── tunnel (10.99.0.0/30) ──→ VM-B (exit)      │
+│       ↑                                                          │
+│  [Exit node role] ←── tunnel (10.99.1.0/30) ── VM-C (entrance) │
+│       │                                                          │
+│       └──→ Internet (masquerade)                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+The two roles use completely separate resources:
+- **Different nftables tables**: main firewall uses `table inet filter`, exit-node uses `table ip vpn007_exit_node`
+- **Different WireGuard interfaces**: VPN clients use the AmneziaWG interface, exit-node uses `wg-exit-node`
+- **Different tunnel subnets**: forwarding uses `10.99.0.0/30`, exit-node uses `10.99.1.0/30` (configurable)
+- **Different listen ports**: AmneziaWG uses its own port, exit-node tunnel uses port `51822` (configurable)
+
+#### Example: Two VMs, each serving as exit for the other
+
+**VM-A** (IP: 203.0.113.10) forwards its traffic through VM-B, and also serves as exit node for VM-B:
+
+```bash
+# .env on VM-A
+DOMAIN=vpn-a.example.com
+
+# Forward my clients' traffic to VM-B
+FORWARDING_ENABLED=true
+TUNNEL_TYPE=wireguard
+SECONDARY_VM_IP=198.51.100.20
+TUNNEL_SUBNET=10.99.0.0/30
+FORWARDING_PORTS=tcp:443:443:HTTPS,udp:51820:51820:AWG
+
+# Also serve as exit node for VM-B's forwarded traffic
+EXIT_NODE_ENABLED=true
+EXIT_NODE_TUNNEL_TYPE=wireguard
+EXIT_NODE_PEER_IP=198.51.100.20
+EXIT_NODE_TUNNEL_SUBNET=10.99.1.0/30
+EXIT_NODE_LISTEN_PORT=51822
+```
+
+**VM-B** (IP: 198.51.100.20) forwards its traffic through VM-A, and also serves as exit node for VM-A:
+
+```bash
+# .env on VM-B
+DOMAIN=vpn-b.example.com
+
+# Forward my clients' traffic to VM-A
+FORWARDING_ENABLED=true
+TUNNEL_TYPE=wireguard
+SECONDARY_VM_IP=203.0.113.10
+TUNNEL_SUBNET=10.99.0.0/30
+FORWARDING_PORTS=tcp:443:443:HTTPS,udp:51820:51820:AWG
+
+# Also serve as exit node for VM-A's forwarded traffic
+EXIT_NODE_ENABLED=true
+EXIT_NODE_TUNNEL_TYPE=wireguard
+EXIT_NODE_PEER_IP=203.0.113.10
+EXIT_NODE_TUNNEL_SUBNET=10.99.1.0/30
+EXIT_NODE_LISTEN_PORT=51822
+```
+
+After deploying both VMs:
+- VM-A's VPN clients exit through VM-B's IP (198.51.100.20)
+- VM-B's VPN clients exit through VM-A's IP (203.0.113.10)
+- Both VMs serve their own cover websites and management panels independently
+
+#### Setup steps for exit-node role
+
+1. Deploy with `EXIT_NODE_ENABLED=true` — generates configs in `deploy/exit-node/`
+2. Copy `exit-node/wg-exit-node.conf` to `/etc/wireguard/`
+3. Replace `REPLACE_WITH_PEER_PUBLIC_KEY` with the peer's actual public key
+4. Exchange public keys between VMs (your key is in `exit-node/exit-node-public.key`)
+5. Bring up the tunnel: `wg-quick up wg-exit-node`
+6. Enable on boot: `systemctl enable wg-quick@wg-exit-node`
+
+See `deploy/exit-node/README.md` for detailed instructions generated for your specific configuration.
+
 ## Backup and restore
 
 ### What to back up
@@ -1308,6 +1488,55 @@ SystemMaxUse=200M
 MaxRetentionSec=30day
 ```
 
+## Kernel parameters
+
+VPN007 automatically configures the required Linux kernel parameters during deployment. No manual `sysctl` configuration is needed.
+
+### Parameters set automatically
+
+| Parameter | Value | Set by | When |
+|-----------|-------|--------|------|
+| `net.ipv4.ip_forward` | `1` | Docker Compose (sysctls) | AmneziaWG container start |
+| `net.ipv4.conf.all.src_valid_mark` | `1` | Docker Compose (sysctls) | AmneziaWG container start |
+| `net.ipv4.ip_forward` | `1` | forwarding-install.py | VM-B setup (exit node) |
+| `net.ipv4.ip_forward` | `1` | wg-exit-node PostUp | Exit-node tunnel up |
+
+### How it works
+
+**On VM-A (main VPN node):**
+
+The AmneziaWG container is configured with Docker Compose `sysctls` directives that set `net.ipv4.ip_forward=1` and `net.ipv4.conf.all.src_valid_mark=1` within the container's network namespace. Since AmneziaWG runs with `network_mode: host`, these settings apply to the host kernel directly. The parameters are set each time the container starts — no persistent `/etc/sysctl.d/` file is needed because the container is always running.
+
+**On VM-B (exit node via forwarding script):**
+
+The generated `forwarding-install.py` script calls `sysctl -w net.ipv4.ip_forward=1` during setup. This enables IP forwarding so that traffic received through the tunnel can be routed to the internet. The setting is applied at runtime; to persist across reboots, the forwarding script also configures the tunnel via `wg-quick` or systemd, which re-applies the sysctl on interface up (via `PostUp` hooks).
+
+**On exit-node role (dual-role VM):**
+
+The generated `wg-exit-node.conf` includes a `PostUp = sysctl -w net.ipv4.ip_forward=1` directive that enables forwarding each time the exit-node WireGuard interface comes up.
+
+### Verifying kernel parameters
+
+```bash
+# Check IP forwarding is enabled
+sysctl net.ipv4.ip_forward
+# Expected: net.ipv4.ip_forward = 1
+
+# Check src_valid_mark (needed for WireGuard routing)
+sysctl net.ipv4.conf.all.src_valid_mark
+# Expected: net.ipv4.conf.all.src_valid_mark = 1
+```
+
+### Manual override
+
+If you need to disable IP forwarding after stopping VPN007 (e.g., during decommissioning):
+
+```bash
+sysctl -w net.ipv4.ip_forward=0
+```
+
+This takes effect immediately. The setting reverts to the system default on next reboot (typically `0` unless configured in `/etc/sysctl.conf`).
+
 ## CLI reference
 
 ```
@@ -1340,6 +1569,13 @@ usage: vpn007 [-h] [--version] [--env-file ENV_FILE] [--dry-run] [--debug]
               [--forwarding-ports FORWARDING_PORTS]
               [--reconnect-initial-delay-sec RECONNECT_INITIAL_DELAY_SEC]
               [--reconnect-max-delay-sec RECONNECT_MAX_DELAY_SEC]
+              [--tunnel-subnet TUNNEL_SUBNET]
+              [--exit-node-enabled EXIT_NODE_ENABLED]
+              [--exit-node-tunnel-type EXIT_NODE_TUNNEL_TYPE]
+              [--exit-node-peer-ip EXIT_NODE_PEER_IP]
+              [--exit-node-tunnel-subnet EXIT_NODE_TUNNEL_SUBNET]
+              [--exit-node-listen-port EXIT_NODE_LISTEN_PORT]
+              [--exit-node-reverse-initiated EXIT_NODE_REVERSE_INITIATED]
               [--xray-initial-client XRAY_INITIAL_CLIENT]
               [--awg-initial-peer AWG_INITIAL_PEER]
               [--output-dir OUTPUT_DIR] [--deployment-log-path DEPLOYMENT_LOG_PATH]
@@ -1374,6 +1610,309 @@ pytest tests/test_compose.py -v
 # Run with the CI Hypothesis profile (fewer examples, faster)
 HYPOTHESIS_PROFILE=ci pytest
 ```
+
+## Uninstalling VPN007
+
+To completely remove VPN007 from a server:
+
+```bash
+cd /opt/vpn007
+
+# 1. Stop and remove all containers and networks
+docker compose down --volumes --remove-orphans
+
+# 2. Remove Docker images (optional — frees disk space)
+docker compose down --rmi all
+
+# 3. Remove systemd timers and services
+systemctl disable --now blocklist-updater.timer hostname-resolver.timer certbot-renew.timer
+rm -f /etc/systemd/system/blocklist-updater.{service,timer}
+rm -f /etc/systemd/system/hostname-resolver.{service,timer}
+rm -f /etc/systemd/system/certbot-renew.{service,timer}
+systemctl daemon-reload
+
+# 4. Remove nftables rules (restores default policy)
+nft flush ruleset
+# Or restore your pre-VPN007 nftables config if you have one:
+# nft -f /etc/nftables.conf.backup
+
+# 5. Remove the firewall management script
+rm -f /usr/local/bin/vpn007-fw
+
+# 6. Remove WireGuard tunnel interfaces (if forwarding was used)
+wg-quick down wg-tunnel 2>/dev/null
+wg-quick down wg-exit-node 2>/dev/null
+rm -f /etc/wireguard/wg-tunnel.conf /etc/wireguard/wg-exit-node.conf
+
+# 7. Remove the deployment directory
+rm -rf /opt/vpn007
+
+# 8. (Optional) Remove swap if it was auto-provisioned
+swapoff /swapfile
+rm -f /swapfile
+sed -i '/\/swapfile/d' /etc/fstab
+
+# 9. (Optional) Remove Docker entirely
+apt purge docker-ce docker-ce-cli containerd.io docker-compose-plugin
+rm -rf /var/lib/docker
+```
+
+After uninstalling, verify:
+- `docker ps` shows no VPN007 containers
+- `nft list ruleset` shows no VPN007 tables
+- `systemctl list-timers` shows no VPN007 timers
+- Port 443 and the AmneziaWG UDP port are no longer listening
+
+## Rollback
+
+If a re-deployment breaks your setup, you can roll back to the previous working configuration.
+
+### Quick rollback (from backup)
+
+```bash
+cd /opt/vpn007
+
+# Stop broken services
+docker compose down
+
+# Restore from your most recent backup
+tar xzf /root/vpn007-backup-YYYYMMDD-HHMMSS.tar.gz
+
+# Restart with the restored config
+docker compose up -d
+nft -f nftables.conf
+```
+
+### Rollback without a backup
+
+If you don't have a backup but the previous config was committed to git:
+
+```bash
+cd /path/to/vpn007
+
+# Check what changed in the last deploy
+git diff HEAD -- src/vpn007/templates/
+
+# Revert to the previous version
+git checkout HEAD~1
+
+# Regenerate configs with the old version
+pip install -e .
+vpn007 --dry-run --output-dir /opt/vpn007
+
+# Apply on the server
+cd /opt/vpn007
+docker compose up -d
+nft -f nftables.conf
+```
+
+### Partial rollback (single component)
+
+If only one service is broken, you can restore just that component:
+
+```bash
+# Restore only Nginx config from backup
+tar xzf /root/vpn007-backup-YYYYMMDD-HHMMSS.tar.gz deploy/nginx/
+docker compose restart reverse_proxy
+
+# Restore only nftables rules
+tar xzf /root/vpn007-backup-YYYYMMDD-HHMMSS.tar.gz deploy/nftables.conf
+nft -f nftables.conf
+
+# Restore only the 3x-ui database (client configs)
+docker compose stop three_x_ui
+tar xzf /root/vpn007-backup-YYYYMMDD-HHMMSS.tar.gz deploy/data/three_x_ui/
+docker compose start three_x_ui
+```
+
+### Prevention
+
+To make rollbacks easier, always back up before re-deploying:
+
+```bash
+tar czf /root/vpn007-backup-$(date +%Y%m%d-%H%M%S).tar.gz \
+    .env data/ nftables.conf docker-compose.yml nginx/ xray/ systemd/ scripts/
+```
+
+## Container resource limits
+
+The generated `docker-compose.yml` includes memory limits for each container to prevent any single service from exhausting host RAM (especially important on 1-2 GB VMs):
+
+| Container | Memory limit | Memory reservation |
+|-----------|-------------|-------------------|
+| `vpn007_reverse_proxy` | 128 MB | 32 MB |
+| `vpn007_three_x_ui` | 256 MB | 64 MB |
+| `vpn007_amneziawg` | 128 MB | 32 MB |
+| `vpn007_tailscale` | 128 MB | 32 MB |
+| `vpn007_cover_site` | 64 MB | 16 MB |
+| `vpn007_certbot` | 128 MB | 32 MB |
+
+These limits are set via `deploy_resources` in the Compose file:
+
+```yaml
+services:
+  reverse_proxy:
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 32M
+```
+
+If a container exceeds its memory limit, Docker's OOM killer terminates it and the `restart: unless-stopped` policy brings it back. Monitor OOM events with:
+
+```bash
+docker events --filter event=oom --since 24h
+journalctl -k | grep -i "out of memory"
+```
+
+For high-traffic deployments (many concurrent clients), increase the limits for `three_x_ui` and `amneziawg` in `docker-compose.yml`:
+
+```bash
+# Edit the generated file directly on the server
+vim /opt/vpn007/docker-compose.yml
+docker compose up -d  # Recreates containers with new limits
+```
+
+## Docker network isolation
+
+All bridge-mode containers (`reverse_proxy`, `three_x_ui`, `cover_site`) communicate over an internal Docker bridge network (`vpn_net`). This network is intentionally isolated:
+
+- **No inter-container access to host network**: Bridge containers cannot reach host-only services (e.g., SSH on port 22) unless explicitly published.
+- **Internal DNS resolution**: Containers reference each other by service name (e.g., `three_x_ui:2053`) — no host ports are exposed for internal-only services.
+- **Host-network containers** (`amneziawg`, `tailscale`) use `network_mode: host` because they require direct access to network interfaces for tunnel creation. These containers can reach all host ports and all bridge containers.
+
+### Network security implications
+
+| Container | Network mode | Can reach host ports | Can reach internet | Can reach other containers |
+|-----------|-------------|---------------------|-------------------|---------------------------|
+| reverse_proxy | bridge (vpn_net) | No | Yes (for proxy mode) | Yes (vpn_net only) |
+| three_x_ui | bridge (vpn_net) | No | Yes (Xray outbound) | Yes (vpn_net only) |
+| cover_site | bridge (vpn_net) | No | No | Yes (vpn_net only) |
+| amneziawg | host | Yes | Yes | Yes (all) |
+| tailscale | host | Yes | Yes | Yes (all) |
+| certbot | bridge (vpn_net) | No | Yes (ACME) | No (run-once utility) |
+
+### Hardening recommendations
+
+For additional network isolation beyond the defaults:
+
+1. **Disable ICC (inter-container communication)** if you don't need containers to talk to each other directly. Note: this breaks the reverse proxy → backend routing, so only use if you restructure with explicit links.
+
+2. **Use Docker's `internal` network option** for the cover site if it serves only static files:
+   ```yaml
+   networks:
+     vpn_net:
+       internal: false  # default — allows internet access
+     cover_net:
+       internal: true   # no internet access for cover_site
+   ```
+
+3. **Drop capabilities** for containers that don't need them (already applied in the generated Compose file):
+   ```yaml
+   cap_drop:
+     - ALL
+   cap_add:
+     - NET_BIND_SERVICE  # only for reverse_proxy (port 443)
+   ```
+
+## Web panel rate limiting
+
+When `APPROVED_IPS` is configured, unauthorized connections are rejected at the Nginx level before reaching the panel. However, if IP-based access control is not feasible (e.g., operators with unpredictable IPs who cannot use DDNS), the panels are additionally protected by Nginx rate limiting:
+
+- **Login endpoints**: 5 requests per minute per source IP (burst of 3)
+- **API endpoints**: 30 requests per minute per source IP (burst of 10)
+- **Static assets**: No rate limit
+
+Rate limiting is enforced via `limit_req_zone` in the generated Nginx config:
+
+```nginx
+# Generated in nginx/http.conf
+limit_req_zone $binary_remote_addr zone=panel_login:1m rate=5r/m;
+limit_req_zone $binary_remote_addr zone=panel_api:1m rate=30r/m;
+
+location ~ ^/secretpanel-.*/login {
+    limit_req zone=panel_login burst=3 nodelay;
+    ...
+}
+```
+
+Requests exceeding the rate limit receive HTTP 429 (Too Many Requests). Combined with the random admin credentials and secret URL paths, this provides defense-in-depth against brute-force attacks even without IP allowlisting.
+
+For maximum security, use IP-based access control (`APPROVED_IPS`) whenever possible — it is strictly superior to rate limiting because unauthorized traffic never reaches the application layer.
+
+## Security hardening (AppArmor)
+
+Docker applies default AppArmor profiles to all containers on Debian/Ubuntu systems. These profiles restrict containers from:
+- Writing to `/proc` and `/sys` (except allowed paths)
+- Mounting filesystems
+- Accessing raw network sockets (unless `NET_RAW` capability is granted)
+- Loading kernel modules
+
+### VPN007-specific considerations
+
+The default Docker AppArmor profile (`docker-default`) is sufficient for most VPN007 containers. Exceptions:
+
+| Container | Additional requirements | Notes |
+|-----------|------------------------|-------|
+| `amneziawg` | `NET_ADMIN`, `NET_RAW` capabilities + host network | Required for WireGuard interface creation; runs with `--privileged` or explicit caps |
+| `tailscale` | `NET_ADMIN`, `NET_RAW` + `/dev/net/tun` access | Required for tunnel interface; uses host network |
+| `reverse_proxy` | `NET_BIND_SERVICE` | Bind to ports <1024 (443) |
+| `three_x_ui` | None beyond defaults | Xray uses userspace networking |
+| `cover_site` | None beyond defaults | Static file serving only |
+
+### Verifying AppArmor status
+
+```bash
+# Check AppArmor is active
+aa-status
+
+# Verify Docker containers are confined
+docker inspect --format='{{.AppArmorProfile}}' vpn007_reverse_proxy
+# Expected: "docker-default"
+
+# Containers with host network mode may show "unconfined" — this is expected
+# for amneziawg and tailscale which need direct network access
+docker inspect --format='{{.AppArmorProfile}}' vpn007_amneziawg
+```
+
+### Custom AppArmor profile (optional)
+
+For environments requiring stricter confinement, you can create a custom AppArmor profile for the reverse proxy that additionally restricts file writes:
+
+```bash
+# /etc/apparmor.d/docker-vpn007-nginx
+#include <tunables/global>
+
+profile docker-vpn007-nginx flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+
+  network inet stream,
+  network inet6 stream,
+
+  /etc/nginx/** r,
+  /var/log/nginx/** w,
+  /var/cache/nginx/** rw,
+  /run/nginx.pid rw,
+  /tmp/** rw,
+
+  deny /proc/** w,
+  deny /sys/** w,
+}
+```
+
+Load and apply:
+
+```bash
+apparmor_parser -r /etc/apparmor.d/docker-vpn007-nginx
+# Then in docker-compose.yml, add:
+# security_opt:
+#   - apparmor=docker-vpn007-nginx
+```
+
+For most deployments, the default Docker AppArmor profile provides adequate confinement. Custom profiles are recommended only for high-security environments or compliance requirements.
 
 ## Credits
 

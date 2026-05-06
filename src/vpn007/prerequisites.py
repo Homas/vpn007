@@ -418,7 +418,8 @@ def check_system_resources() -> list[str]:
     """Verify that the host has sufficient RAM and disk space.
 
     Checks:
-    - Total RAM >= 2 GB
+    - Total RAM >= 2 GB (warns if below; swap will be auto-provisioned
+      during deployment for systems with ≤1.5 GB RAM)
     - Free disk space on the root filesystem >= 10 GB
 
     Returns
@@ -439,8 +440,8 @@ def check_system_resources() -> list[str]:
                 mem_gb = mem_kb / (1024 * 1024)
                 if mem_gb < MIN_RAM_GB:
                     warnings.append(
-                        f"Insufficient RAM: {mem_gb:.1f} GB detected, "
-                        f"minimum {MIN_RAM_GB} GB required."
+                        f"Low RAM: {mem_gb:.1f} GB detected (minimum {MIN_RAM_GB} GB "
+                        f"recommended). Swap will be auto-provisioned during deployment."
                     )
                 break
     except (FileNotFoundError, ValueError, OSError, IndexError):

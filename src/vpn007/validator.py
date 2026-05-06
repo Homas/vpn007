@@ -93,6 +93,30 @@ def validate_config(config: DeployConfig) -> list[str]:
                 "secondary_vm_ip is required when forwarding_enabled is True"
             )
 
+    # --- Exit node role config consistency ---
+    if config.exit_node_enabled:
+        if config.exit_node_tunnel_type is None:
+            errors.append(
+                "exit_node_tunnel_type is required when exit_node_enabled is True"
+            )
+        if config.exit_node_peer_ip is None:
+            errors.append(
+                "exit_node_peer_ip is required when exit_node_enabled is True"
+            )
+        # Ensure exit node tunnel subnet doesn't overlap with forwarding tunnel subnet
+        if config.forwarding_enabled and config.exit_node_tunnel_subnet == config.tunnel_subnet:
+            errors.append(
+                f"exit_node_tunnel_subnet ({config.exit_node_tunnel_subnet}) must differ "
+                f"from tunnel_subnet ({config.tunnel_subnet}) when both forwarding and "
+                "exit node role are enabled on the same VM"
+            )
+
+    # Validate exit_node_peer_ip
+    if config.exit_node_peer_ip is not None and not _is_valid_ip(config.exit_node_peer_ip):
+        errors.append(
+            f"Invalid IP address for exit_node_peer_ip: {config.exit_node_peer_ip!r}"
+        )
+
     return errors
 
 

@@ -45,9 +45,9 @@ RECONNECT_INITIAL_DELAY: int = {{ reconnect_initial_delay_sec }}
 RECONNECT_MAX_DELAY: int = {{ reconnect_max_delay_sec }}
 
 # WireGuard/AmneziaWG tunnel subnet (point-to-point)
-WG_TUNNEL_SUBNET: str = "10.99.0.0/30"
-WG_LOCAL_IP: str = "10.99.0.2"   # Secondary VM side
-WG_REMOTE_IP: str = "10.99.0.1"  # Primary VM side
+WG_TUNNEL_SUBNET: str = "{{ tunnel_subnet }}"
+WG_LOCAL_IP: str = "{{ tunnel_secondary_ip }}"   # Secondary VM side
+WG_REMOTE_IP: str = "{{ tunnel_primary_ip }}"  # Primary VM side
 WG_LISTEN_PORT: int = 51821
 
 # SSH tunnel settings

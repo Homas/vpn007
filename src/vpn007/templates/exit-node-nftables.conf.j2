@@ -1,0 +1,41 @@
+{# Template: exit-node-nftables.conf — nftables rules for exit node role #}
+{# These rules coexist with the main VPN007 nftables.conf by using a separate table. #}
+{# © Vadim Pavlov 2026 #}
+
+# VPN007 Exit Node Role — DNAT/SNAT/Forward rules
+# This VM accepts forwarded traffic from {{ peer_ip }} via tunnel {{ tunnel_type }}
+# Tunnel subnet: {{ tunnel_subnet }} (local: {{ local_tunnel_ip }}, peer: {{ peer_tunnel_ip }})
+#
+# This table is independent of the main vpn007 firewall table (table inet filter).
+# Traffic arriving on the tunnel interface is DNATed to the internet;
+# traffic arriving on the public interface goes to local VPN services as usual.
+
+table ip vpn007_exit_node {
+    chain prerouting {
+        type nat hook prerouting priority -100; policy accept;
+
+        # Accept forwarded traffic from the tunnel peer and route to internet
+        # Traffic from the peer tunnel IP is masqueraded outbound
+        ip saddr {{ peer_tunnel_ip }} accept
+    }
+
+    chain postrouting {
+        type nat hook postrouting priority 100; policy accept;
+
+        # Masquerade (SNAT) traffic forwarded from the tunnel peer to the internet
+        ip saddr {{ peer_tunnel_ip }} oifname != "{{ tunnel_interface }}" masquerade
+    }
+
+    chain forward {
+        type filter hook forward priority 5; policy accept;
+
+        # Allow established/related traffic back through
+        ct state established,related accept
+
+        # Allow traffic from tunnel peer to be forwarded to the internet
+        ip saddr {{ peer_tunnel_ip }} accept
+
+        # Allow return traffic back to the tunnel peer
+        ip daddr {{ peer_tunnel_ip }} accept
+    }
+}

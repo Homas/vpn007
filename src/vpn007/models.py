@@ -185,6 +185,15 @@ class DeployConfig:
     forwarding_ports: list[PortForward] = field(default_factory=list)
     reconnect_initial_delay_sec: int = 5
     reconnect_max_delay_sec: int = 300
+    tunnel_subnet: str = "10.99.0.0/30"  # Point-to-point tunnel subnet
+
+    # Exit node role (dual-role: this VM also serves as exit node for another)
+    exit_node_enabled: bool = False
+    exit_node_tunnel_type: TunnelType | None = None
+    exit_node_peer_ip: str | None = None  # IP of the VM forwarding traffic to us
+    exit_node_tunnel_subnet: str = "10.99.1.0/30"  # Different subnet from primary tunnel
+    exit_node_listen_port: int = 51822  # WG listen port for exit-node tunnel
+    exit_node_reverse_initiated: bool = False
 
     # Initial clients
     xray_initial_client: str = "default-client"

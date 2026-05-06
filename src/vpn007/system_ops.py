@@ -801,3 +801,213 @@ def _check_container_health(compose_path: Path) -> bool:
 
     logger.info("All expected containers are running.")
     return True
+
+
+# ---------------------------------------------------------------------------
+# Swap provisioning for low-memory systems
+# ---------------------------------------------------------------------------
+
+# Threshold: provision swap when total RAM is at or below this value.
+_LOW_RAM_THRESHOLD_KB = 1_536_000  # ~1.5 GB (covers 1 GB VMs with slight variance)
+_SWAP_SIZE_GB = 1
+_SWAPFILE_PATH = Path("/swapfile")
+
+
+def _get_total_ram_kb() -> int | None:
+    """Read total physical RAM in kilobytes from /proc/meminfo.
+
+    Returns None if the value cannot be determined (non-Linux or read error).
+    """
+    try:
+        meminfo = Path("/proc/meminfo").read_text()
+        for line in meminfo.splitlines():
+            if line.startswith("MemTotal:"):
+                parts = line.split()
+                return int(parts[1])
+    except (FileNotFoundError, ValueError, OSError, IndexError):
+        pass
+    return None
+
+
+def _get_total_swap_kb() -> int:
+    """Read total configured swap in kilobytes from /proc/meminfo.
+
+    Returns 0 if swap cannot be determined.
+    """
+    try:
+        meminfo = Path("/proc/meminfo").read_text()
+        for line in meminfo.splitlines():
+            if line.startswith("SwapTotal:"):
+                parts = line.split()
+                return int(parts[1])
+    except (FileNotFoundError, ValueError, OSError, IndexError):
+        pass
+    return 0
+
+
+def provision_swap_if_needed() -> bool:
+    """Auto-provision a 1 GB swapfile if the system has ≤1.5 GB RAM and no swap.
+
+    This ensures low-memory VMs (1 GB) can handle transient memory spikes
+    during Docker image pulls, certbot renewals, and concurrent VPN clients.
+
+    The function is idempotent:
+    - If swap already exists (any amount), it does nothing.
+    - If /swapfile already exists, it does nothing.
+    - If RAM is above the threshold, it does nothing.
+
+    Returns
+    -------
+    bool
+        True if swap was provisioned, False if no action was taken.
+
+    Raises
+    ------
+    DeployError
+        If swap provisioning is attempted but fails.
+    """
+    total_ram = _get_total_ram_kb()
+    if total_ram is None:
+        logger.debug("Cannot determine RAM size — skipping swap provisioning.")
+        return False
+
+    ram_mb = total_ram / 1024
+    if total_ram > _LOW_RAM_THRESHOLD_KB:
+        logger.debug(
+            "RAM is %.0f MB (above threshold) — swap provisioning not needed.", ram_mb
+        )
+        return False
+
+    # Check if swap already exists
+    existing_swap = _get_total_swap_kb()
+    if existing_swap > 0:
+        logger.debug(
+            "Swap already configured (%d MB) — skipping provisioning.",
+            existing_swap // 1024,
+        )
+        return False
+
+    # Check if swapfile already exists on disk (maybe not activated)
+    if _SWAPFILE_PATH.exists():
+        logger.info(
+            "%s already exists — activating it.", _SWAPFILE_PATH
+        )
+        _activate_existing_swapfile()
+        return True
+
+    # Provision new swapfile
+    logger.info(
+        "Low RAM detected (%.0f MB, no swap). Provisioning %d GB swapfile...",
+        ram_mb,
+        _SWAP_SIZE_GB,
+    )
+
+    try:
+        _create_swapfile()
+    except (subprocess.CalledProcessError, OSError) as exc:
+        raise DeployError(
+            service="system",
+            step="provision_swap",
+            message=f"Failed to provision swap: {exc}",
+            remediation=(
+                "Manually create swap:\n"
+                f"  fallocate -l {_SWAP_SIZE_GB}G /swapfile\n"
+                "  chmod 600 /swapfile\n"
+                "  mkswap /swapfile\n"
+                "  swapon /swapfile\n"
+                "  echo '/swapfile none swap sw 0 0' >> /etc/fstab"
+            ),
+        ) from exc
+
+    logger.info("Swap provisioned successfully (%d GB).", _SWAP_SIZE_GB)
+    return True
+
+
+def _create_swapfile() -> None:
+    """Create, format, activate a swapfile and persist it in /etc/fstab."""
+    swapfile = str(_SWAPFILE_PATH)
+
+    # Allocate the file
+    subprocess.run(
+        ["fallocate", "-l", f"{_SWAP_SIZE_GB}G", swapfile],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    # Restrict permissions (swap must be 600)
+    _SWAPFILE_PATH.chmod(0o600)
+
+    # Format as swap
+    subprocess.run(
+        ["mkswap", swapfile],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    # Activate
+    subprocess.run(
+        ["swapon", swapfile],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    # Persist across reboots (idempotent — check if already in fstab)
+    _persist_swapfile_in_fstab(swapfile)
+
+
+def _activate_existing_swapfile() -> None:
+    """Activate an existing /swapfile that isn't currently enabled."""
+    swapfile = str(_SWAPFILE_PATH)
+
+    # Ensure correct permissions
+    _SWAPFILE_PATH.chmod(0o600)
+
+    try:
+        subprocess.run(
+            ["swapon", swapfile],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.CalledProcessError as exc:
+        # May already be active or need mkswap first
+        if "already" not in exc.stderr.lower():
+            # Try formatting first, then activating
+            subprocess.run(
+                ["mkswap", swapfile],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            subprocess.run(
+                ["swapon", swapfile],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+    _persist_swapfile_in_fstab(swapfile)
+    logger.info("Existing swapfile activated.")
+
+
+def _persist_swapfile_in_fstab(swapfile: str) -> None:
+    """Add swapfile entry to /etc/fstab if not already present."""
+    fstab = Path("/etc/fstab")
+    try:
+        fstab_content = fstab.read_text()
+        if swapfile in fstab_content:
+            return  # Already persisted
+        with fstab.open("a") as f:
+            f.write(f"\n{swapfile} none swap sw 0 0\n")
+        logger.debug("Added %s to /etc/fstab.", swapfile)
+    except OSError as exc:
+        logger.warning("Could not persist swap in /etc/fstab: %s", exc)

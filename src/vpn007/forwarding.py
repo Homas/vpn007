@@ -63,6 +63,8 @@ def generate_forwarding_script(config: DeployConfig) -> str:
     str
         The rendered Python script content.
     """
+    import ipaddress as _ipaddress
+
     env = _create_jinja_env()
     template = env.get_template("forwarding-script.py.j2")
 
@@ -77,6 +79,13 @@ def generate_forwarding_script(config: DeployConfig) -> str:
         for pf in config.forwarding_ports
     ]
 
+    # Compute tunnel IPs from subnet
+    tunnel_net = _ipaddress.ip_network(config.tunnel_subnet, strict=False)
+    tunnel_hosts = list(tunnel_net.hosts())
+    # .1 = primary VM side, .2 = secondary VM side
+    tunnel_primary_ip = str(tunnel_hosts[0]) if len(tunnel_hosts) >= 2 else "10.99.0.1"
+    tunnel_secondary_ip = str(tunnel_hosts[1]) if len(tunnel_hosts) >= 2 else "10.99.0.2"
+
     context = {
         # Primary VM connection info
         "primary_vm_ip": config.incoming_ip or config.public_ipv4 or "REPLACE_ME",
@@ -84,6 +93,10 @@ def generate_forwarding_script(config: DeployConfig) -> str:
         # Tunnel configuration
         "tunnel_type": config.tunnel_type.value if config.tunnel_type else "wireguard",
         "reverse_initiated": config.reverse_initiated,
+        # Tunnel subnet and IPs
+        "tunnel_subnet": config.tunnel_subnet,
+        "tunnel_primary_ip": tunnel_primary_ip,
+        "tunnel_secondary_ip": tunnel_secondary_ip,
         # Port forwarding rules
         "forwarding_ports": port_forwards,
         # Reconnection parameters

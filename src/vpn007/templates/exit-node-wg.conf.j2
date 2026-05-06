@@ -1,0 +1,24 @@
+{# Template: exit-node-wg.conf — WireGuard config for exit node tunnel endpoint #}
+{# © Vadim Pavlov 2026 #}
+
+[Interface]
+# Exit node side of the tunnel
+PrivateKey = {{ private_key }}
+Address = {{ local_tunnel_ip }}/30
+ListenPort = {{ listen_port }}
+
+# Enable IP forwarding for this interface
+PostUp = sysctl -w net.ipv4.ip_forward=1
+PostUp = nft -f {{ nftables_conf_path }}
+PostDown = nft delete table ip vpn007_exit_node
+
+[Peer]
+# Peer VM (entrance node) that forwards traffic to us
+PublicKey = {{ peer_public_key }}
+AllowedIPs = {{ peer_tunnel_ip }}/32
+{% if reverse_initiated %}
+# Peer initiates the connection — no endpoint needed
+{% else %}
+Endpoint = {{ peer_ip }}:{{ peer_listen_port }}
+{% endif %}
+PersistentKeepalive = 25
