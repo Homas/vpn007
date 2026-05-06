@@ -92,9 +92,6 @@ services:
       - AWG_I5={{ awg_obfuscation.i5 }}
 {% endif %}
 {% endif %}
-    sysctls:
-      - net.ipv4.conf.all.src_valid_mark=1
-      - net.ipv4.ip_forward=1
 
   # --- Tailscale mesh VPN ---
   tailscale:

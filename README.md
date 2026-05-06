@@ -1545,8 +1545,8 @@ VPN007 automatically configures the required Linux kernel parameters during depl
 
 | Parameter | Value | Set by | When |
 |-----------|-------|--------|------|
-| `net.ipv4.ip_forward` | `1` | Docker Compose (sysctls) | AmneziaWG container start |
-| `net.ipv4.conf.all.src_valid_mark` | `1` | Docker Compose (sysctls) | AmneziaWG container start |
+| `net.ipv4.ip_forward` | `1` | Deployer (`sysctl -w`) | Before starting containers |
+| `net.ipv4.conf.all.src_valid_mark` | `1` | Deployer (`sysctl -w`) | Before starting containers |
 | `net.ipv4.ip_forward` | `1` | forwarding-install.py | VM-B setup (exit node) |
 | `net.ipv4.ip_forward` | `1` | wg-exit-node PostUp | Exit-node tunnel up |
 
@@ -1554,7 +1554,7 @@ VPN007 automatically configures the required Linux kernel parameters during depl
 
 **On VM-A (main VPN node):**
 
-The AmneziaWG container is configured with Docker Compose `sysctls` directives that set `net.ipv4.ip_forward=1` and `net.ipv4.conf.all.src_valid_mark=1` within the container's network namespace. Since AmneziaWG runs with `network_mode: host`, these settings apply to the host kernel directly. The parameters are set each time the container starts — no persistent `/etc/sysctl.d/` file is needed because the container is always running.
+The deployer sets `net.ipv4.ip_forward=1` and `net.ipv4.conf.all.src_valid_mark=1` on the host via `sysctl -w` before starting containers. These are required because AmneziaWG and Tailscale run with `network_mode: host` — Docker does not allow setting sysctls via the `sysctls:` directive on host-network containers. The parameters are set each time the deployer runs; they persist until reboot (the containers re-apply them on restart via their own startup hooks).
 
 **On VM-B (exit node via forwarding script):**
 

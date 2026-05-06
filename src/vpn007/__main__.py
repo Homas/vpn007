@@ -219,7 +219,11 @@ def main(argv: list[str] | None = None) -> int:
         logger.warning("Swap provisioning failed (non-fatal): %s", exc.message)
         logger.info("Continuing without swap. %s", exc.remediation or "")
 
-    # 6c. Start containers
+    # 6c. Set required kernel parameters
+    logger.info("Setting kernel parameters...")
+    _set_kernel_parameters()
+
+    # 6d. Start containers
     logger.info("Starting containers...")
     compose_path = config.output_dir / "docker-compose.yml"
     project_name = "vpn007"
@@ -234,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
         logger.debug("Last error: %s", exc)
         return EXIT_DOCKER_ERROR
 
-    # 6d. Acquire TLS certificate
+    # 6e. Acquire TLS certificate
     logger.info("Acquiring TLS certificate...")
     if config.skip_certbot:
         logger.info("SKIP_CERTBOT is set — keeping self-signed certificate.")
@@ -307,6 +311,30 @@ def main(argv: list[str] | None = None) -> int:
 # ---------------------------------------------------------------------------
 # Certbot helper
 # ---------------------------------------------------------------------------
+
+
+def _set_kernel_parameters() -> None:
+    """Set required kernel parameters for WireGuard/AmneziaWG and IP forwarding.
+
+    These must be set on the host (not via Docker sysctls) because the
+    AmneziaWG and Tailscale containers use network_mode: host.
+    """
+    params = [
+        ("net.ipv4.ip_forward", "1"),
+        ("net.ipv4.conf.all.src_valid_mark", "1"),
+    ]
+    for param, value in params:
+        try:
+            subprocess.run(
+                ["sysctl", "-w", f"{param}={value}"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=True,
+            )
+            logger.debug("Set %s = %s", param, value)
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            logger.warning("Failed to set %s=%s: %s", param, value, exc)
 
 
 def _run_certbot(config: DeployConfig, compose_path: Path) -> None:
