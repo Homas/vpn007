@@ -100,7 +100,7 @@ class TestProvisionXrayClient:
         # Extract the part after vless://
         uri_body = result.vless_share_link[len("vless://"):]
         # UUID@server:port?params#fragment
-        assert "@1.2.3.4:443" in uri_body
+        assert "@vpn.example.com:443" in uri_body
         assert "type=tcp" in uri_body
         assert "security=reality" in uri_body
         assert "sni=www.microsoft.com" in uri_body
@@ -109,24 +109,24 @@ class TestProvisionXrayClient:
         assert "sid=aabb0011" in uri_body
         assert uri_body.endswith("#test")
 
-    def test_server_address_priority(self) -> None:
-        """Server address prefers public_ipv4 > incoming_ip > domain."""
-        # public_ipv4 takes priority
+    def test_server_address_uses_domain(self) -> None:
+        """Server address always uses the domain (for TLS/SNI compatibility)."""
+        # Domain is used even when public_ipv4 is set
         config = DeployConfig(
             domain="vpn.example.com",
             public_ipv4="1.2.3.4",
             incoming_ip="5.6.7.8",
         )
         result = provision_xray_client(config)
-        assert result.server_address == "1.2.3.4"
+        assert result.server_address == "vpn.example.com"
 
-        # incoming_ip when no public_ipv4
+        # Domain is used when only incoming_ip is set
         config2 = DeployConfig(
             domain="vpn.example.com",
             incoming_ip="5.6.7.8",
         )
         result2 = provision_xray_client(config2)
-        assert result2.server_address == "5.6.7.8"
+        assert result2.server_address == "vpn.example.com"
 
         # domain as fallback
         config3 = DeployConfig(domain="vpn.example.com")
@@ -182,15 +182,15 @@ class TestProvisionAwgPeer:
         assert f"PrivateKey = {result.private_key}" in result.conf_content
 
     def test_conf_contains_endpoint(self, valid_config: DeployConfig) -> None:
-        """Generated .conf contains the server endpoint."""
+        """Generated .conf contains the server endpoint using domain."""
         config = DeployConfig(
             domain="vpn.example.com",
             public_ipv4="1.2.3.4",
             awg_listen_port=34567,
         )
         result = provision_awg_peer(config)
-        assert "Endpoint = 1.2.3.4:34567" in result.conf_content
-        assert result.endpoint == "1.2.3.4:34567"
+        assert "Endpoint = vpn.example.com:34567" in result.conf_content
+        assert result.endpoint == "vpn.example.com:34567"
 
     def test_conf_without_obfuscation(self) -> None:
         """Without AWG obfuscation, conf has no S/H/J/I params."""

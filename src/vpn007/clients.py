@@ -79,7 +79,8 @@ def provision_xray_client(
         logger.info("Auto-generated Reality keys for Xray client provisioning")
 
     # Determine the server address clients should connect to.
-    server_address = config.public_ipv4 or config.incoming_ip or config.domain
+    # Use domain for VLESS (TLS-based, needs SNI match with cert).
+    server_address = config.domain
     server_port = 443
 
     # Build the VLESS share link per the standard URI format:
@@ -139,7 +140,8 @@ def provision_awg_peer(
     private_key, public_key = generate_wg_keypair()
 
     # Determine the server endpoint clients should connect to.
-    server_address = config.public_ipv4 or config.incoming_ip or config.domain
+    # Use domain for the endpoint (survives IP changes, consistent with Xray).
+    server_address = config.domain
     awg_port = config.awg_listen_port if config.awg_listen_port is not None else 51820
     endpoint = f"{server_address}:{awg_port}"
 

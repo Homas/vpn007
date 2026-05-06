@@ -16,7 +16,7 @@ import logging
 from pathlib import Path
 
 from vpn007.blocklist import generate_blocklist_updater
-from vpn007.clients import provision_xray_client
+from vpn007.clients import provision_awg_peer, provision_xray_client
 from vpn007.compose import generate_compose
 from vpn007.docs import generate_docs
 from vpn007.exit_node import generate_exit_node_configs
@@ -272,6 +272,14 @@ def generate_all(config: DeployConfig) -> dict[str, str]:
     files[f"clients/{client_filename}"] = client_content
     _write_file(output_dir / "clients" / client_filename, client_content)
 
+    # 14. AmneziaWG peer provisioning
+    logger.info("Provisioning initial AmneziaWG peer...")
+    awg_peer = provision_awg_peer(config, peer_name=config.awg_initial_peer)
+    awg_filename = f"awg-{awg_peer.peer_name}.conf"
+    awg_content = awg_peer.conf_content + "\n"
+    files[f"clients/{awg_filename}"] = awg_content
+    _write_file(output_dir / "clients" / awg_filename, awg_content)
+
     logger.info(
         "Generated %d files in %s", len(files), output_dir,
     )
@@ -340,7 +348,7 @@ def generate_deployment_summary(
     str
         A formatted summary string suitable for console output.
     """
-    server = config.public_ipv4 or config.incoming_ip or config.domain
+    server = config.domain
     lines: list[str] = [
         "",
         "=" * 60,

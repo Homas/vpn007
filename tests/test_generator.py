@@ -191,7 +191,7 @@ class TestGenerateDeploymentSummary:
     """Tests for generate_deployment_summary."""
 
     def test_summary_contains_endpoints(self, tmp_path: Path) -> None:
-        """Summary includes service endpoint URLs."""
+        """Summary includes service endpoint URLs using domain."""
         config = DeployConfig(
             domain="vpn.example.com",
             output_dir=tmp_path,
@@ -201,7 +201,7 @@ class TestGenerateDeploymentSummary:
         files = {"docker-compose.yml": "content"}
         summary = generate_deployment_summary(config, files)
 
-        assert "203.0.113.10" in summary
+        assert "vpn.example.com" in summary
         assert config.xui_path_prefix in summary
         assert config.awg_panel_path_prefix in summary
         assert "34567" in summary

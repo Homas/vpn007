@@ -12,6 +12,7 @@ import base64
 import os
 import random
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from cryptography.hazmat.primitives.serialization import (
     Encoding,
@@ -79,6 +80,29 @@ def generate_wg_keypair() -> tuple[str, str]:
         base64.b64encode(raw_private).decode("ascii"),
         base64.b64encode(raw_public).decode("ascii"),
     )
+
+
+def generate_ssh_keypair() -> tuple[str, str]:
+    """Generate an Ed25519 SSH key pair for tunnel authentication.
+
+    Returns ``(private_key_openssh, public_key_openssh)`` where:
+    - private_key_openssh is the PEM-encoded private key (OpenSSH format)
+    - public_key_openssh is the single-line public key (OpenSSH format)
+    """
+    private_key = Ed25519PrivateKey.generate()
+
+    private_pem = private_key.private_bytes(
+        encoding=Encoding.PEM,
+        format=PrivateFormat.OpenSSH,
+        encryption_algorithm=NoEncryption(),
+    ).decode("ascii")
+
+    public_openssh = private_key.public_key().public_bytes(
+        encoding=Encoding.OpenSSH,
+        format=PublicFormat.OpenSSH,
+    ).decode("ascii")
+
+    return private_pem, public_openssh
 
 
 def generate_awg_obfuscation() -> AwgObfuscation:

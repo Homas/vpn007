@@ -135,7 +135,7 @@ def _service_status_section(deploy_result: DeployResult) -> str:
 
 def _public_endpoints_section(config: DeployConfig) -> str:
     """Req 19.1 — public-facing endpoints."""
-    server = config.public_ipv4 or config.incoming_ip or config.domain
+    server = config.domain
     lines: list[str] = [
         "## Public Endpoints\n",
         f"- **Domain**: `{config.domain}`",
@@ -219,7 +219,7 @@ def _vpn_client_section(
 
 def _web_panel_section(config: DeployConfig) -> str:
     """Req 19.3 — web panel access URLs with approved-IP reminder."""
-    server = config.public_ipv4 or config.incoming_ip or config.domain
+    server = config.domain
     lines: list[str] = [
         "## Web Panel Access\n",
         f"### 3x-ui Panel\n",

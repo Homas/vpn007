@@ -367,6 +367,11 @@ When a VM runs the full VPN007 stack AND also serves as an exit node for another
 
 The deployer creates one Xray client and one AmneziaWG peer during initial deployment. A UUID and VLESS share link are generated for the Xray client; WireGuard keys and a `.conf` file are generated for the AmneziaWG peer. Client configs are saved to `{output_dir}/clients/`.
 
+Both client configs use the `DOMAIN` value as the server address (not the IP), since:
+- The VLESS+Reality connection requires SNI matching the TLS certificate
+- Domain-based endpoints survive IP changes without client reconfiguration
+- DNS resolution handles the domain → IP mapping on the client side
+
 #### Output
 
 | Flag | Env var | Default | Description |
@@ -445,7 +450,8 @@ deploy/
 │   ├── certbot-renew.service
 │   └── certbot-renew.timer
 ├── clients/
-│   └── xray-default-client.txt  # VLESS share link
+│   ├── xray-default-client.txt  # VLESS share link
+│   └── awg-default-peer.conf    # AmneziaWG client config
 ├── docs/
 │   ├── README.md
 │   ├── troubleshooting.md
@@ -455,6 +461,8 @@ deploy/
 
 When `EXIT_NODE_ENABLED=true`, an additional directory is generated:
 
+**WireGuard tunnel type** (`EXIT_NODE_TUNNEL_TYPE=wireguard`):
+
 ```
 deploy/
 └── exit-node/
@@ -462,6 +470,30 @@ deploy/
     ├── nftables-exit-node.conf     # Separate nftables table for exit-node NAT
     ├── exit-node-public.key        # Public key to share with the peer VM
     └── README.md                   # Setup instructions for this deployment
+```
+
+**SSH tunnel type** (`EXIT_NODE_TUNNEL_TYPE=ssh`):
+
+```
+deploy/
+└── exit-node/
+    ├── vpn007-exit-node-ssh.service  # systemd unit for autossh tunnel
+    ├── nftables-exit-node.conf       # Separate nftables table for exit-node NAT
+    ├── exit-node-ssh-private.key     # Ed25519 private key (install on this VM)
+    ├── exit-node-ssh-public.key      # Public key (install on peer VM)
+    ├── setup-exit-node.sh            # One-command setup script
+    └── README.md                     # Setup instructions
+```
+
+**Tailscale tunnel type** (`EXIT_NODE_TUNNEL_TYPE=tailscale`):
+
+```
+deploy/
+└── exit-node/
+    ├── vpn007-exit-node-tailscale.service  # systemd unit for nftables + forwarding
+    ├── nftables-exit-node.conf             # Separate nftables table for exit-node NAT
+    ├── setup-exit-node.sh                  # One-command setup script
+    └── README.md                           # Setup instructions
 ```
 
 All volume mounts in `docker-compose.yml` use relative paths (`./data/...`), so the output directory is portable — copy it anywhere and run `docker compose up -d`.
@@ -797,8 +829,10 @@ If the tunnel between VM-A and VM-B goes down:
 
 ### Supported tunnel types
 
-| Tunnel type | Use case | Requirements on VM-B |
-|-------------|----------|---------------------|
+All three tunnel types are supported for both the forwarding role (`TUNNEL_TYPE`) and the exit-node role (`EXIT_NODE_TUNNEL_TYPE`):
+
+| Tunnel type | Use case | Requirements on peer VM |
+|-------------|----------|------------------------|
 | `wireguard` | Best performance, lowest overhead | WireGuard or AmneziaWG kernel module |
 | `ssh` | Works through most firewalls, no extra software | SSH server + autossh |
 | `tailscale` | Easiest setup, works behind NAT | Tailscale client |
@@ -1198,9 +1232,9 @@ A VM can simultaneously run the full VPN007 stack (serving its own clients) AND 
 
 The two roles use completely separate resources:
 - **Different nftables tables**: main firewall uses `table inet filter`, exit-node uses `table ip vpn007_exit_node`
-- **Different WireGuard interfaces**: VPN clients use the AmneziaWG interface, exit-node uses `wg-exit-node`
+- **Different tunnel interfaces**: VPN clients use the AmneziaWG interface, exit-node uses `wg-exit-node` (WireGuard), autossh (SSH), or Tailscale overlay
 - **Different tunnel subnets**: forwarding uses `10.99.0.0/30`, exit-node uses `10.99.1.0/30` (configurable)
-- **Different listen ports**: AmneziaWG uses its own port, exit-node tunnel uses port `51822` (configurable)
+- **Different listen ports**: AmneziaWG uses its own port, exit-node tunnel uses port `51822` (configurable, WireGuard only)
 
 #### Example: Two VMs, each serving as exit for the other
 
@@ -1254,11 +1288,26 @@ After deploying both VMs:
 #### Setup steps for exit-node role
 
 1. Deploy with `EXIT_NODE_ENABLED=true` — generates configs in `deploy/exit-node/`
+
+**WireGuard:**
+
 2. Copy `exit-node/wg-exit-node.conf` to `/etc/wireguard/`
 3. Replace `REPLACE_WITH_PEER_PUBLIC_KEY` with the peer's actual public key
 4. Exchange public keys between VMs (your key is in `exit-node/exit-node-public.key`)
 5. Bring up the tunnel: `wg-quick up wg-exit-node`
 6. Enable on boot: `systemctl enable wg-quick@wg-exit-node`
+
+**SSH:**
+
+2. Run the setup script: `chmod +x exit-node/setup-exit-node.sh && sudo ./exit-node/setup-exit-node.sh`
+3. Install the public key (`exit-node/exit-node-ssh-public.key`) in `/root/.ssh/authorized_keys` on the peer VM
+4. The systemd service (`vpn007-exit-node-ssh`) handles autossh with automatic reconnection
+
+**Tailscale:**
+
+2. Run the setup script: `chmod +x exit-node/setup-exit-node.sh && sudo ./exit-node/setup-exit-node.sh`
+3. Ensure both VMs are on the same Tailscale tailnet
+4. The systemd service (`vpn007-exit-node-tailscale`) loads nftables rules on boot
 
 See `deploy/exit-node/README.md` for detailed instructions generated for your specific configuration.
 
