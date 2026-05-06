@@ -11,12 +11,13 @@ Usage::
 from __future__ import annotations
 
 import logging
+import subprocess
 import sys
 from pathlib import Path
 
 from vpn007.cli import parse_args
 from vpn007.config import load_config
-from vpn007.models import DeployError
+from vpn007.models import DeployConfig, DeployError
 from vpn007.validator import validate_config
 
 # ---------------------------------------------------------------------------
@@ -179,12 +180,38 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_OK
 
     # 6. Full deployment (prerequisites, containers, firewall, timers)
+    from vpn007.docker_ops import compose_up
+    from vpn007.prerequisites import (
+        detect_os,
+        run_prerequisite_checks,
+    )
+    from vpn007.system_ops import (
+        apply_awg_userspace_fallback,
+        apply_nftables,
+        install_systemd_timers,
+        persist_nftables,
+        provision_awg_kernel_module,
+        provision_swap_if_needed,
+        smoke_test,
+        verify_firewall_rules,
+    )
+
+    # 6a. Check prerequisites
     logger.info("Checking prerequisites...")
-    # TODO: prerequisites.check_all(config)
+    try:
+        distro, version = detect_os()
+        logger.info("Detected OS: %s %s", distro, version)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("OS detection failed: %s", exc)
+        return EXIT_SYSTEM_ERROR
 
-    # Auto-provision swap on low-memory systems (≤1.5 GB RAM, no existing swap)
-    from vpn007.system_ops import provision_swap_if_needed
+    prereq_ok, prereq_errors = run_prerequisite_checks()
+    if not prereq_ok:
+        for err in prereq_errors:
+            logger.error("Prerequisite check failed: %s", err)
+        return EXIT_SYSTEM_ERROR
 
+    # 6b. Auto-provision swap on low-memory systems
     try:
         if provision_swap_if_needed():
             logger.info("Swap auto-provisioned for low-memory system.")
@@ -192,30 +219,252 @@ def main(argv: list[str] | None = None) -> int:
         logger.warning("Swap provisioning failed (non-fatal): %s", exc.message)
         logger.info("Continuing without swap. %s", exc.remediation or "")
 
+    # 6c. Start containers
     logger.info("Starting containers...")
-    # TODO: docker_ops.compose_up(...)
+    compose_path = config.output_dir / "docker-compose.yml"
+    project_name = "vpn007"
+    try:
+        compose_up(compose_path, project_name)
+    except subprocess.CalledProcessError as exc:
+        logger.error(
+            "Failed to start containers after %d attempts. "
+            "Check docker compose logs for details.",
+            3,
+        )
+        logger.debug("Last error: %s", exc.stderr if hasattr(exc, "stderr") else exc)
+        return EXIT_DOCKER_ERROR
 
+    # 6d. Acquire TLS certificate
     logger.info("Acquiring TLS certificate...")
-    # TODO: certbot initial acquisition (skip if config.skip_certbot)
     if config.skip_certbot:
-        logger.info("SKIP_CERTBOT is set — keeping self-signed certificate")
+        logger.info("SKIP_CERTBOT is set — keeping self-signed certificate.")
     else:
-        pass  # TODO: run certbot
+        try:
+            _run_certbot(config, compose_path)
+        except DeployError as exc:
+            logger.warning(
+                "Certbot failed (non-fatal, using self-signed cert): %s",
+                exc.message,
+            )
+            logger.info("You can retry manually: %s", exc.remediation or "")
 
+    # 6e. Apply firewall rules
     logger.info("Applying firewall rules...")
-    # TODO: system_ops.apply_nftables(...)
+    nftables_path = config.output_dir / "nftables.conf"
+    try:
+        apply_nftables(nftables_path)
+        persist_nftables(nftables_path)
+        verify_firewall_rules()
+    except DeployError as exc:
+        logger.error("Firewall provisioning failed: %s", exc.message)
+        if exc.remediation:
+            logger.info("Remediation: %s", exc.remediation)
+        return EXIT_SYSTEM_ERROR
 
+    # 6f. Install systemd timers
     logger.info("Installing systemd timers...")
-    # TODO: system_ops.install_systemd_timers(...)
+    systemd_dir = config.output_dir / "systemd"
+    try:
+        install_systemd_timers(systemd_dir)
+    except DeployError as exc:
+        logger.error("Systemd timer installation failed: %s", exc.message)
+        if exc.remediation:
+            logger.info("Remediation: %s", exc.remediation)
+        return EXIT_SYSTEM_ERROR
 
+    # 6g. Provision AmneziaWG kernel module (non-fatal — falls back to userspace)
     logger.info("Provisioning AmneziaWG kernel module...")
-    # TODO: system_ops.provision_awg_kernel_module(...)
+    kernel_module_loaded = provision_awg_kernel_module(distro)
+    if not kernel_module_loaded:
+        logger.info(
+            "Using amneziawg-go userspace fallback (reduced performance)."
+        )
+        try:
+            apply_awg_userspace_fallback(compose_path, project_name)
+        except DeployError as exc:
+            logger.warning(
+                "Userspace fallback failed (non-fatal): %s", exc.message
+            )
 
+    # 6h. Run smoke tests
     logger.info("Running smoke tests...")
-    # TODO: system_ops.smoke_test(config)
+    test_results = smoke_test(config)
+    all_passed = all(test_results.values())
+    if all_passed:
+        logger.info("All smoke tests passed.")
+    else:
+        failed = [k for k, v in test_results.items() if not v]
+        logger.warning(
+            "Some smoke tests failed: %s. "
+            "Services may still be starting. Check with: docker compose ps",
+            ", ".join(failed),
+        )
 
-    logger.info("Deployment complete")
+    logger.info("Deployment complete.")
     return EXIT_OK
+
+
+# ---------------------------------------------------------------------------
+# Certbot helper
+# ---------------------------------------------------------------------------
+
+
+def _run_certbot(config: DeployConfig, compose_path: Path) -> None:
+    """Acquire a TLS certificate via Let's Encrypt certbot.
+
+    1. Temporarily opens port 80 in nftables for HTTP-01 challenge.
+    2. Runs certbot via docker compose run --rm.
+    3. Closes port 80.
+    4. Reloads Nginx with the new certificate.
+
+    Raises
+    ------
+    DeployError
+        If certbot fails.
+    """
+    # Open port 80 temporarily
+    logger.info("Opening port 80 for ACME challenge...")
+    _nft_open_port_80()
+
+    try:
+        # Run certbot
+        certbot_cmd = [
+            "docker",
+            "compose",
+            "-f",
+            str(compose_path),
+            "run",
+            "--rm",
+            "certbot",
+            "certonly",
+            "--webroot",
+            "-w",
+            "/var/www/certbot",
+            "-d",
+            config.domain,
+            "--non-interactive",
+            "--agree-tos",
+            "--email",
+            f"admin@{config.domain}",
+        ]
+        logger.info("Running certbot: %s", " ".join(certbot_cmd))
+
+        result = subprocess.run(
+            certbot_cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        if result.returncode != 0:
+            raise DeployError(
+                service="certbot",
+                step="acquire_certificate",
+                message=f"Certbot failed (exit {result.returncode}): "
+                f"{result.stderr.strip()}",
+                remediation=(
+                    "Retry manually:\n"
+                    f"  docker compose -f {compose_path} run --rm certbot "
+                    f"certonly --webroot -w /var/www/certbot -d {config.domain}"
+                ),
+            )
+
+        logger.info("TLS certificate acquired successfully.")
+
+    finally:
+        # Always close port 80
+        logger.info("Closing port 80...")
+        _nft_close_port_80()
+
+    # Reload Nginx to pick up the new cert
+    logger.info("Reloading Nginx with new certificate...")
+    reload_cmd = [
+        "docker",
+        "compose",
+        "-f",
+        str(compose_path),
+        "exec",
+        "reverse_proxy",
+        "nginx",
+        "-s",
+        "reload",
+    ]
+    try:
+        subprocess.run(
+            reload_cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+        logger.info("Nginx reloaded with TLS certificate.")
+    except subprocess.CalledProcessError as exc:
+        logger.warning("Nginx reload failed: %s", exc.stderr.strip())
+
+
+def _nft_open_port_80() -> None:
+    """Temporarily add an nftables rule to allow inbound TCP port 80."""
+    try:
+        subprocess.run(
+            [
+                "nft",
+                "add",
+                "rule",
+                "inet",
+                "filter",
+                "input",
+                "tcp",
+                "dport",
+                "80",
+                "accept",
+                "comment",
+                '"vpn007-certbot-temp"',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        logger.warning("Could not open port 80: %s", exc)
+
+
+def _nft_close_port_80() -> None:
+    """Remove the temporary port 80 rule from nftables."""
+    try:
+        # Find and delete the rule by comment
+        result = subprocess.run(
+            ["nft", "-a", "list", "chain", "inet", "filter", "input"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                if "vpn007-certbot-temp" in line and "handle" in line:
+                    # Extract handle number
+                    parts = line.strip().split()
+                    handle_idx = parts.index("handle") + 1
+                    handle = parts[handle_idx]
+                    subprocess.run(
+                        [
+                            "nft",
+                            "delete",
+                            "rule",
+                            "inet",
+                            "filter",
+                            "input",
+                            "handle",
+                            handle,
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        check=False,
+                    )
+                    break
+    except (FileNotFoundError, OSError, ValueError, IndexError) as exc:
+        logger.warning("Could not close port 80: %s", exc)
 
 
 if __name__ == "__main__":
