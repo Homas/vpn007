@@ -134,6 +134,8 @@ services:
     volumes:
       - ./data/letsencrypt:/etc/letsencrypt
       - ./data/certbot_webroot:/var/www/certbot
+    networks:
+      - vpn_net
 
 networks:
   vpn_net:
