@@ -225,13 +225,13 @@ def main(argv: list[str] | None = None) -> int:
     project_name = "vpn007"
     try:
         compose_up(compose_path, project_name)
-    except subprocess.CalledProcessError as exc:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         logger.error(
             "Failed to start containers after %d attempts. "
             "Check docker compose logs for details.",
             3,
         )
-        logger.debug("Last error: %s", exc.stderr if hasattr(exc, "stderr") else exc)
+        logger.debug("Last error: %s", exc)
         return EXIT_DOCKER_ERROR
 
     # 6d. Acquire TLS certificate

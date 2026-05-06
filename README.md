@@ -109,7 +109,7 @@ Dev dependencies (for running tests):
 |----------|--------------|---------|-------------|
 | CPU | 1 vCPU | 1 vCPU | 2+ vCPU |
 | RAM | 1 GB — up to 10 clients (swap auto-provisioned) | 2 GB — up to 20-30 clients | 4 GB — many concurrent clients |
-| Disk | 15 GB | 15 GB | 30 GB |
+| Disk | 20 GB | 20 GB | 30 GB |
 
 Disk usage grows with VPN client count, Docker image layers, and log retention. Additional resources are needed when inter-VM forwarding is enabled.
 

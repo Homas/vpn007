@@ -27,6 +27,10 @@ def compose_up(compose_path: Path, project_name: str) -> None:
     attempts. On each failed attempt the container logs from the failed
     run are captured and logged at DEBUG level.
 
+    On the first attempt, output is streamed to the console in real-time
+    so the operator can see image pull progress. Subsequent retries use
+    captured output for cleaner logging.
+
     Parameters
     ----------
     compose_path:
@@ -38,6 +42,8 @@ def compose_up(compose_path: Path, project_name: str) -> None:
     ------
     subprocess.CalledProcessError
         If all retry attempts are exhausted.
+    subprocess.TimeoutExpired
+        If all retry attempts time out.
     """
     cmd = [
         "docker",
@@ -50,7 +56,7 @@ def compose_up(compose_path: Path, project_name: str) -> None:
         "-d",
     ]
 
-    last_error: subprocess.CalledProcessError | None = None
+    last_error: subprocess.CalledProcessError | subprocess.TimeoutExpired | None = None
 
     for attempt in range(1, MAX_RETRIES + 1):
         logger.info(
@@ -60,17 +66,39 @@ def compose_up(compose_path: Path, project_name: str) -> None:
             " ".join(cmd),
         )
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=120,
-                check=True,
-            )
-            logger.debug("compose up stdout: %s", result.stdout)
-            logger.debug("compose up stderr: %s", result.stderr)
+            if attempt == 1:
+                # First attempt: stream output to console so operator
+                # can see image pull progress on first deploy.
+                result = subprocess.run(
+                    cmd,
+                    timeout=600,
+                    check=True,
+                )
+            else:
+                # Subsequent retries: capture output for cleaner logs.
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                    check=True,
+                )
+                logger.debug("compose up stdout: %s", result.stdout)
+                logger.debug("compose up stderr: %s", result.stderr)
             logger.info("Containers started successfully.")
             return
+        except subprocess.TimeoutExpired as exc:
+            last_error = exc
+            logger.warning(
+                "compose up attempt %d/%d timed out after %d seconds.",
+                attempt,
+                MAX_RETRIES,
+                600,
+            )
+
+            if attempt < MAX_RETRIES:
+                logger.info("Retrying in %d seconds...", RETRY_DELAY_SECONDS)
+                time.sleep(RETRY_DELAY_SECONDS)
         except subprocess.CalledProcessError as exc:
             last_error = exc
             logger.warning(
@@ -79,8 +107,8 @@ def compose_up(compose_path: Path, project_name: str) -> None:
                 MAX_RETRIES,
                 exc.returncode,
             )
-            logger.debug("stdout: %s", exc.stdout)
-            logger.debug("stderr: %s", exc.stderr)
+            logger.debug("stdout: %s", getattr(exc, "stdout", ""))
+            logger.debug("stderr: %s", getattr(exc, "stderr", ""))
 
             # Capture container logs for diagnostics
             _log_container_output(compose_path, project_name)
@@ -91,10 +119,15 @@ def compose_up(compose_path: Path, project_name: str) -> None:
 
     # All attempts exhausted
     assert last_error is not None
+    error_detail = (
+        last_error.stderr
+        if isinstance(last_error, subprocess.CalledProcessError)
+        else f"timed out after {last_error.timeout}s"
+    )
     logger.error(
         "All %d compose up attempts failed. Last error: %s",
         MAX_RETRIES,
-        last_error.stderr,
+        error_detail,
     )
     raise last_error
 
