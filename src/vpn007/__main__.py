@@ -119,7 +119,19 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_CONFIG_ERROR
     except TypeError as exc:
         # e.g. DeployConfig.__init__() missing required positional argument
-        logger.error("Configuration error: %s", exc)
+        msg = str(exc)
+        if "missing" in msg and "argument" in msg:
+            # Extract field name from "missing 1 required positional argument: 'domain'"
+            import re
+            fields = re.findall(r"'(\w+)'", msg)
+            field_names = ", ".join(f.upper() for f in fields)
+            logger.error(
+                "Missing required parameter: %s. "
+                "Set it in .env file or pass via CLI (e.g. --domain vpn.example.com).",
+                field_names,
+            )
+        else:
+            logger.error("Configuration error: %s", exc)
         return EXIT_CONFIG_ERROR
     except Exception as exc:  # noqa: BLE001
         logger.error("Unexpected error loading config: %s", exc)

@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import os
 import random
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -170,6 +171,9 @@ _ENV_FIELD_MAP: list[tuple[str, str, type | object]] = [
     ("FORWARDING_PORTS", "forwarding_ports", _parse_port_forwards),
     ("RECONNECT_INITIAL_DELAY_SEC", "reconnect_initial_delay_sec", int),
     ("RECONNECT_MAX_DELAY_SEC", "reconnect_max_delay_sec", int),
+    # Initial clients
+    ("XRAY_INITIAL_CLIENT", "xray_initial_client", str),
+    ("AWG_INITIAL_PEER", "awg_initial_peer", str),
     # Output
     ("OUTPUT_DIR", "output_dir", _parse_path),
     ("DEPLOYMENT_LOG_PATH", "deployment_log_path", _parse_path),
@@ -196,21 +200,34 @@ _AWG_OBF_FIELDS = [
     "AWG_I1", "AWG_I2", "AWG_I3", "AWG_I4", "AWG_I5",
 ]
 
+# Fields that trigger "partial config" detection — I1-I5 are always optional
+# and do NOT require S/H params to be present.
+_AWG_CORE_FIELDS = [
+    "AWG_S1", "AWG_S2", "AWG_S3", "AWG_S4",
+    "AWG_H1", "AWG_H2", "AWG_H3", "AWG_H4",
+    "AWG_JC", "AWG_JMIN", "AWG_JMAX",
+]
+
 
 def _parse_awg_obfuscation(env: dict[str, str | None]) -> AwgObfuscation | None:
     """Parse AwgObfuscation from individual AWG_* env vars.
 
-    Returns None if none of the AWG obfuscation env vars are set.
-    Raises ValueError if only some are set (partial config).
+    Returns None if none of the core AWG obfuscation env vars (S/H/J) are set.
+    I1-I5 alone do NOT trigger obfuscation config — they are stored separately
+    and applied to the auto-generated config if S/H params are not provided.
+    Raises ValueError if only some S/H params are set (partial config).
     """
-    present = {k for k in _AWG_OBF_FIELDS if env.get(k)}
-    if not present:
+    # Only core fields (S/H/J) trigger the obfuscation config path
+    core_present = {k for k in _AWG_CORE_FIELDS if env.get(k)}
+    if not core_present:
+        # No core params set — check if only I1-I5 are provided
+        # If so, return None (auto-generate S/H/J, I values applied later)
         return None
 
     # All required fields for a complete obfuscation config
     required = {"AWG_S1", "AWG_S2", "AWG_S3", "AWG_S4",
                 "AWG_H1", "AWG_H2", "AWG_H3", "AWG_H4"}
-    missing = required - present
+    missing = required - core_present
     if missing:
         raise ValueError(
             f"Partial AmneziaWG obfuscation config: missing {', '.join(sorted(missing))}. "
@@ -391,6 +408,14 @@ def load_config(cli_args: argparse.Namespace) -> DeployConfig:
     # 5. Auto-randomize awg_listen_port if not set
     if "awg_listen_port" not in config_kwargs or config_kwargs["awg_listen_port"] is None:
         config_kwargs["awg_listen_port"] = random.randint(10000, 65535)
+
+    # 5b. Append random suffix to panel path prefixes if not explicitly set
+    if "xui_path_prefix" not in config_kwargs:
+        suffix = secrets.token_hex(3)  # 6 hex chars
+        config_kwargs["xui_path_prefix"] = f"/secretpanel-{suffix}"
+    if "awg_panel_path_prefix" not in config_kwargs:
+        suffix = secrets.token_hex(3)
+        config_kwargs["awg_panel_path_prefix"] = f"/awgadmin-{suffix}"
 
     # 6. Handle public IP detection
     _resolve_public_ips(config_kwargs)

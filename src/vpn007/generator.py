@@ -256,7 +256,7 @@ def generate_all(config: DeployConfig) -> dict[str, str]:
 
     # 13. Xray client provisioning
     logger.info("Provisioning initial Xray client...")
-    xray_client = provision_xray_client(config)
+    xray_client = provision_xray_client(config, client_name=config.xray_initial_client)
     client_filename = f"xray-{xray_client.client_name}.txt"
     client_content = xray_client.vless_share_link + "\n"
     files[f"clients/{client_filename}"] = client_content

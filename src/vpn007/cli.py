@@ -276,6 +276,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # -- Output ------------------------------------------------------------
     output = parser.add_argument_group("output")
     output.add_argument(
+        "--xray-initial-client",
+        default=None,
+        help="Name for the initial Xray VLESS+Reality client (default: default-client)",
+    )
+    output.add_argument(
+        "--awg-initial-peer",
+        default=None,
+        help="Name for the initial AmneziaWG peer (default: default-peer)",
+    )
+    output.add_argument(
         "--output-dir",
         default=None,
         help="Output directory for generated files (default: ./deploy)",

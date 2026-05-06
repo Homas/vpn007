@@ -141,13 +141,16 @@ vpn007 [OPTIONS]
 
 #### Operational flags
 
+These flags are CLI-only and cannot be set via `.env` file.
+
 | Flag | Description |
 |------|-------------|
 | `--dry-run` | Generate config files only — no containers, no firewall, no timers |
 | `--debug` | Enable verbose debug logging (full command stdout/stderr on console) |
 | `--env-file PATH` | Path to `.env` file (default: `.env` in current directory) |
-| `--output-dir PATH` | Output directory for generated files (default: `./deploy`) |
 | `--version` | Show version and exit |
+
+The `AUTO_INSTALL=y` environment variable can be set to skip interactive prompts (for scripted/CI deployments). It is not a CLI flag.
 
 #### General
 
@@ -163,9 +166,11 @@ vpn007 [OPTIONS]
 
 | Flag | Env var | Default | Description |
 |------|---------|---------|-------------|
-| `--xui-path-prefix` | `XUI_PATH_PREFIX` | `/secretpanel` | URL path for 3x-ui web panel |
-| `--awg-panel-path-prefix` | `AWG_PANEL_PATH_PREFIX` | `/awgadmin` | URL path for AmneziaWG panel |
+| `--xui-path-prefix` | `XUI_PATH_PREFIX` | `/secretpanel-<random>` | URL path for 3x-ui web panel |
+| `--awg-panel-path-prefix` | `AWG_PANEL_PATH_PREFIX` | `/awgadmin-<random>` | URL path for AmneziaWG panel |
 | `--enable-port-8443` | `ENABLE_PORT_8443` | `false` | Enable secondary HTTPS port 8443 |
+
+When not explicitly set, the deployer appends a random 6-character suffix to the default panel path prefixes (e.g., `/secretpanel-a7f3b2`). This prevents adversaries who know the tool from probing predictable paths. Set explicit values in `.env` if you need stable URLs.
 
 #### Xray / Reality
 
@@ -224,9 +229,11 @@ CPS format tags: `<b 0xHEX>` static bytes, `<r N>` random bytes, `<t>` timestamp
 
 | Flag | Env var | Default | Description |
 |------|---------|---------|-------------|
-| `--tailscale-auth-key` | `TAILSCALE_AUTH_KEY` | *(empty)* | Auth key for automatic registration |
+| `--tailscale-auth-key` | `TAILSCALE_AUTH_KEY` | *(empty — manual auth)* | Auth key for automatic registration |
 | `--tailscale-hostname` | `TAILSCALE_HOSTNAME` | *(empty — uses system hostname)* | Node hostname in the tailnet |
 | `--tailscale-extra-args` | `TAILSCALE_EXTRA_ARGS` | `--advertise-exit-node` | Extra args for Tailscale daemon |
+
+When `TAILSCALE_AUTH_KEY` is empty, the Tailscale container logs a URL for manual browser-based authentication. Set an auth key (generate at https://login.tailscale.com/admin/settings/keys) for unattended deployments.
 
 All three Tailscale variables (`TS_AUTHKEY`, `TS_HOSTNAME`, `TS_EXTRA_ARGS`) are always present in the generated `docker-compose.yml`, even when empty. This makes them easy to edit in-place on the server without regenerating.
 
@@ -290,6 +297,15 @@ When both `SSH_APPROVED_IPS` and `SSH_APPROVED_HOSTNAMES` are empty, SSH is open
 | `--reconnect-initial-delay-sec` | `RECONNECT_INITIAL_DELAY_SEC` | `5` | Initial reconnect delay (seconds) |
 | `--reconnect-max-delay-sec` | `RECONNECT_MAX_DELAY_SEC` | `300` | Max reconnect delay (seconds) |
 
+#### Initial clients
+
+| Flag | Env var | Default | Description |
+|------|---------|---------|-------------|
+| `--xray-initial-client` | `XRAY_INITIAL_CLIENT` | `default-client` | Name for the initial Xray VLESS+Reality client |
+| `--awg-initial-peer` | `AWG_INITIAL_PEER` | `default-peer` | Name for the initial AmneziaWG peer |
+
+The deployer creates one Xray client and one AmneziaWG peer during initial deployment. A UUID and VLESS share link are generated for the Xray client; WireGuard keys and a `.conf` file are generated for the AmneziaWG peer. Client configs are saved to `{output_dir}/clients/`.
+
 #### Output
 
 | Flag | Env var | Default | Description |
@@ -304,6 +320,33 @@ Parameters are resolved in this order (highest priority first):
 1. CLI arguments
 2. `.env` file values
 3. Built-in defaults
+
+### Input validation
+
+The deployer validates all parameters at startup and exits with a clear error message if any value is invalid. Key validation rules:
+
+| Parameter | Validation |
+|-----------|-----------|
+| `DOMAIN` | Required; must be a valid hostname |
+| `COVER_SITE_URL` | Required when `COVER_SITE_MODE=proxy`; must be a valid URL |
+| `XUI_PATH_PREFIX`, `AWG_PANEL_PATH_PREFIX` | Must start with `/` |
+| `AWG_S1` | Integer 0-1132 |
+| `AWG_S2` | Integer 0-1188 |
+| `AWG_S3` | Integer 0-1216 |
+| `AWG_S4` | Integer 0-32 |
+| `AWG_H1`-`AWG_H4` | Integer 5-2147483647 |
+| `AWG_JC` | Integer 1-128 |
+| `AWG_JMIN`, `AWG_JMAX` | Integer 0-1280; `JMAX` must be > `JMIN` |
+| `AWG_S1`-`H4` group | All eight must be provided together, or all omitted for auto-generation |
+| `TLS_VERSIONS` | Comma-separated; only `1.2` and `1.3` accepted |
+| `HTTPS_PORT` | Integer 1-65535 |
+| `TUNNEL_TYPE` | Must be `wireguard`, `ssh`, or `tailscale` when `FORWARDING_ENABLED=true` |
+| `SECONDARY_VM_IP` | Required when `FORWARDING_ENABLED=true` |
+| `FORWARDING_PORTS` | Required when `FORWARDING_ENABLED=true`; format `proto:port:port[:desc]` |
+| `APPROVED_IPS`, `SSH_APPROVED_IPS` | Valid IPv4/IPv6 addresses or CIDR notation |
+| `BLOCKED_AS_NUMBERS` | Must match `AS<digits>` format |
+
+If validation fails, the deployer prints the invalid parameter name, the provided value, the expected format, and exits with code 1. No files are generated or modified.
 
 ### Generated output structure
 
@@ -393,7 +436,7 @@ systemctl list-timers 'blocklist*' 'hostname*' 'certbot*'
 
 ### Firewall management script (`vpn007-fw.sh`)
 
-A standalone shell script for managing blocked/allowed IPs, subnets, and AS numbers in the running nftables firewall without regenerating the full config.
+A standalone shell script for managing blocked/allowed IPs, subnets, and AS numbers in the running nftables firewall without regenerating the full config. All changes are applied immediately and automatically saved to `/etc/nftables.conf`, so they persist across reboots.
 
 **Install on the server:**
 
@@ -461,7 +504,7 @@ sudo vpn007-fw list blocked
 sudo vpn007-fw list ssh
 ```
 
-Changes made via `vpn007-fw` are applied immediately to the running nftables ruleset. They persist until the next `nft flush ruleset` or reboot. To make changes permanent, also update your `.env` file and re-run the deployer, or save the current ruleset with `nft list ruleset > /etc/nftables.conf`.
+Changes made via `vpn007-fw` are applied immediately and automatically saved to `/etc/nftables.conf` (loaded by `nftables.service` on boot). To override the save path, set the `VPN007_NFTABLES_CONF` environment variable.
 
 ### TLS certificate management
 
@@ -565,6 +608,49 @@ Recommendations:
 - For operators with dynamic IPs, use `SSH_APPROVED_HOSTNAMES` with a DDNS hostname
 - Tailscale provides out-of-band management access regardless of firewall rules (it uses its own overlay network)
 
+### Brute-force protection
+
+The nftables firewall includes rate limiting for SSH connections (port 22): a maximum of 5 new connections per minute per source IP. Connections exceeding this rate are dropped silently.
+
+For additional protection, consider installing `fail2ban` on the server:
+
+```bash
+apt install fail2ban
+
+# Enable the SSH jail (enabled by default on Debian/Ubuntu)
+systemctl enable --now fail2ban
+```
+
+The web panels (3x-ui and AmneziaWG) are protected by:
+1. IP-based access control (`APPROVED_IPS` / `APPROVED_HOSTNAMES`) — connections from unauthorized IPs never reach the panel
+2. Random admin credentials generated at deploy time (see below)
+3. Secret URL path prefixes with random suffixes
+
+For environments where IP restriction is not feasible, consider placing the panels behind Tailscale (access via `100.x.x.x` tailnet IPs only) instead of exposing them on the public interface.
+
+### Admin credentials
+
+During deployment, VPN007 generates random credentials for the 3x-ui web panel:
+- **Username**: 8-12 random alphanumeric characters
+- **Password**: 16-24 random characters (letters, digits, and symbols)
+
+These credentials are:
+1. Printed to the console during deployment (save them immediately)
+2. Written to the deployment log at `{output_dir}/deploy.log`
+3. Stored in the 3x-ui database at `{output_dir}/data/three_x_ui/x-ui.db`
+
+To retrieve credentials after deployment:
+
+```bash
+# Check the deployment log
+grep -A2 "3x-ui admin" deploy/deploy.log
+
+# Or query the 3x-ui database directly
+sqlite3 deploy/data/three_x_ui/x-ui.db "SELECT username, password FROM users LIMIT 1;"
+```
+
+The AmneziaWG panel (wg-easy) uses a separate auto-generated password, also printed during deployment and saved to the deployment log.
+
 ## Inter-VM forwarding (relay architecture)
 
 This section explains how to set up a two-VM relay where **VM-A** (entrance node) accepts VPN client connections and forwards traffic through an encrypted tunnel to **VM-B** (exit node), which routes it to the internet. This separates the entry point from the exit point for improved privacy and censorship resistance.
@@ -586,6 +672,8 @@ This section explains how to set up a two-VM relay where **VM-A** (entrance node
 - **VM-A** runs the full VPN007 stack (Nginx, Xray, AmneziaWG, Tailscale, cover site) and accepts client connections on ports 443/UDP.
 - **VM-B** is a lightweight exit node that receives forwarded traffic from VM-A over an encrypted tunnel and routes it to the internet.
 - The deployer generates a standalone Python script (`forwarding-install.py`) that you run on VM-B to set up its side of the tunnel.
+
+**Security note:** The generated `forwarding-install.py` contains embedded cryptographic keys (WireGuard private keys or SSH private keys). Transfer it to VM-B over a secure channel (SCP, SFTP, or via Tailscale). Delete the script from VM-B after successful installation — the keys are copied to their final locations during setup. Do not commit this file to version control or leave it on intermediate machines.
 
 ### Hardware requirements for VM-B (exit node)
 
@@ -824,6 +912,8 @@ tailscale up --authkey=tskey-auth-yyyyy --accept-routes
 python3 /root/forwarding-install.py
 ```
 
+After setup, VM-B initiates the Tailscale connection (works behind NAT), and traffic forwarded from VM-A exits through VM-B's internet connection.
+
 ### Troubleshooting forwarding
 
 | Symptom | Check |
@@ -991,6 +1081,281 @@ After converting to single-node, ensure these are cleaned up:
 | Tailscale routes (if Tailscale tunnel) | Remove `--accept-routes` | Remove |
 | forwarding-install.py on VM-B | — | Delete |
 | IP forwarding sysctl on VM-B | — | Set to 0 |
+
+## Backup and restore
+
+### What to back up
+
+The `data/` directory contains all persistent state. Back it up regularly:
+
+| Path | Contents | Impact if lost |
+|------|----------|----------------|
+| `data/three_x_ui/` | 3x-ui database, Xray configs, client list | Lose all Xray clients and panel settings |
+| `data/amneziawg/` | WireGuard keys, peer configs | Lose all AmneziaWG peers (must redistribute configs) |
+| `data/tailscale/` | Tailscale node state | Node re-registers on next start (minor) |
+| `data/letsencrypt/` | TLS certificates and account keys | Must re-acquire certs (automatic, but brief downtime) |
+| `.env` | Deployment configuration | Must recreate from memory |
+| `nftables.conf` | Firewall rules | Regenerated by re-running deployer |
+
+### Backup procedure
+
+```bash
+# Stop services to ensure consistent state
+cd /opt/vpn007
+docker compose stop
+
+# Create a timestamped backup
+tar czf /root/vpn007-backup-$(date +%Y%m%d-%H%M%S).tar.gz \
+    .env data/ nftables.conf docker-compose.yml
+
+# Restart services
+docker compose start
+```
+
+For zero-downtime backups, you can skip the stop/start — the SQLite database in 3x-ui handles concurrent reads, and WireGuard configs are rarely written. However, stopping ensures a fully consistent snapshot.
+
+### Restore procedure
+
+```bash
+# On a fresh VM with VPN007 prerequisites installed
+cd /opt/vpn007
+tar xzf /root/vpn007-backup-YYYYMMDD-HHMMSS.tar.gz
+
+# Start services
+docker compose up -d
+
+# Re-apply firewall
+nft -f nftables.conf
+
+# Re-install systemd timers
+cp systemd/*.service systemd/*.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now blocklist-updater.timer hostname-resolver.timer certbot-renew.timer
+```
+
+## Upgrading
+
+### Upgrading VPN007 itself
+
+```bash
+cd /path/to/vpn007
+git pull
+pip install -e .
+
+# Re-run the deployer to regenerate configs with new templates
+sudo vpn007
+# or dry-run first to review changes:
+vpn007 --dry-run
+diff /opt/vpn007/docker-compose.yml deploy/docker-compose.yml
+```
+
+Re-running the deployer on an existing deployment is safe:
+- Existing `data/` directories are preserved (never overwritten)
+- Configuration files (Nginx, Xray, nftables, systemd) are regenerated from templates
+- Docker containers are recreated with the new configs
+- Client configurations remain intact in the 3x-ui database and AmneziaWG state
+
+### Upgrading Docker images
+
+```bash
+cd /opt/vpn007
+docker compose pull
+docker compose up -d
+```
+
+This pulls the latest versions of all container images and recreates containers. Persistent data in `data/` bind mounts is unaffected.
+
+### Upgrading the host OS
+
+After a major OS upgrade (e.g., Debian 11 → 12):
+1. Verify Docker and nftables still work: `docker info`, `nft list ruleset`
+2. Re-run `sudo vpn007` to regenerate systemd units (paths may change)
+3. Check that all timers are active: `systemctl list-timers`
+
+## IPv6 support
+
+### Dual-stack firewall
+
+The generated `nftables.conf` includes rules for both IPv4 and IPv6:
+- `table inet filter` — applies to both address families (input/forward/output chains)
+- `table ip nat` — IPv4 NAT (SNAT for outgoing IP, DNAT for forwarding)
+- `table ip6 nat` — IPv6 NAT (only when `OUTGOING_IP` is an IPv6 address or forwarding targets IPv6)
+
+Blocked AS prefixes are resolved for both IPv4 and IPv6 and placed in separate nftables sets:
+- `blocked_v4` — IPv4 prefixes from blocked AS numbers
+- `blocked_v6` — IPv6 prefixes from blocked AS numbers
+
+SSH and panel access sets also have IPv6 counterparts:
+- `approved_ssh_v4` / `approved_ssh_v6`
+- Panel access is enforced at Nginx level and supports both IPv4 and IPv6 in `APPROVED_IPS`
+
+### IPv6 behavior
+
+| Scenario | Behavior |
+|----------|----------|
+| `PUBLIC_IPV6` set | Included in client configs; Nginx listens on `[::]:443` |
+| `PUBLIC_IPV6` empty | IPv6 auto-detected; if unavailable, IPv4-only configs generated |
+| `BLOCKED_AS_NUMBERS` set | Both v4 and v6 prefixes resolved and blocked |
+| `SSH_APPROVED_IPS` with IPv6 | Added to `approved_ssh_v6` set |
+
+## Health checks and monitoring
+
+### Post-deployment verification
+
+After deployment, verify all services are running:
+
+```bash
+# Check all containers are up
+docker compose ps
+
+# Expected output: all services "Up" with correct ports
+# vpn007_reverse_proxy   Up   0.0.0.0:443->443/tcp
+# vpn007_three_x_ui      Up
+# vpn007_amneziawg       Up   0.0.0.0:51820->51820/udp
+# vpn007_tailscale       Up
+# vpn007_cover_site      Up
+
+# Test the cover site (should return 200)
+curl -sk https://your.domain/ | head -20
+
+# Test that Reality SNI routing works (should NOT return your cover site)
+curl -sk --resolve www.microsoft.com:443:your-ip https://www.microsoft.com/
+
+# Test panel access (from an approved IP)
+curl -sk https://your.domain/secretpanel-XXXXX/
+
+# Check Tailscale status
+docker compose exec tailscale tailscale status
+
+# Verify firewall is loaded
+nft list ruleset | head -5
+
+# Check systemd timers
+systemctl list-timers 'blocklist*' 'hostname*' 'certbot*'
+```
+
+### Ongoing monitoring
+
+Key indicators to monitor:
+
+| Check | Command | Expected |
+|-------|---------|----------|
+| Containers running | `docker compose ps` | All "Up" |
+| TLS cert expiry | `openssl s_client -connect localhost:443 </dev/null 2>/dev/null \| openssl x509 -noout -enddate` | >7 days remaining |
+| Disk usage | `df -h /` | <80% |
+| Docker logs for errors | `docker compose logs --since 1h \| grep -i error` | Empty or expected |
+| Tunnel status (if forwarding) | `wg show` or `tailscale status` | Peer connected |
+| Blocklist timer | `systemctl status blocklist-updater.timer` | Active, last run <6h ago |
+
+### Container health checks
+
+The generated `docker-compose.yml` includes Docker health checks for critical services:
+- **reverse_proxy**: `curl -f http://localhost:80/health` (internal health endpoint)
+- **three_x_ui**: TCP check on the Xray port
+- **amneziawg**: WireGuard interface exists and has at least one peer configured
+
+Unhealthy containers are automatically restarted by Docker's restart policy (`unless-stopped`).
+
+## Log management
+
+### Docker container logs
+
+By default, Docker uses the `json-file` log driver with no size limit. For production, configure log rotation:
+
+```bash
+# /etc/docker/daemon.json
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}
+```
+
+Then restart Docker: `systemctl restart docker`
+
+This limits each container to 3 log files of 10 MB each (30 MB max per container, ~180 MB total for 6 containers).
+
+### Deployment log
+
+The deployment log at `{output_dir}/deploy.log` records all actions performed during deployment at DEBUG level. It is overwritten on each deployment run. To preserve history, copy it before re-deploying:
+
+```bash
+cp deploy/deploy.log deploy/deploy-$(date +%Y%m%d-%H%M%S).log
+```
+
+### Systemd timer logs
+
+Timer execution logs are captured by journald:
+
+```bash
+# View blocklist updater logs
+journalctl -u blocklist-updater.service --since "1 hour ago"
+
+# View hostname resolver logs
+journalctl -u hostname-resolver.service --since "1 hour ago"
+
+# View certbot renewal logs
+journalctl -u certbot-renew.service --since "1 day ago"
+```
+
+Configure journald retention in `/etc/systemd/journald.conf`:
+
+```ini
+[Journal]
+SystemMaxUse=200M
+MaxRetentionSec=30day
+```
+
+## CLI reference
+
+```
+$ vpn007 --help
+usage: vpn007 [-h] [--version] [--env-file ENV_FILE] [--dry-run] [--debug]
+              [--domain DOMAIN] [--reality-sni REALITY_SNI]
+              [--cover-site-mode COVER_SITE_MODE] [--cover-site-url COVER_SITE_URL]
+              [--cover-site-static-path COVER_SITE_STATIC_PATH]
+              [--xui-path-prefix XUI_PATH_PREFIX]
+              [--awg-panel-path-prefix AWG_PANEL_PATH_PREFIX]
+              [--enable-port-8443 ENABLE_PORT_8443]
+              [--xray-internal-port XRAY_INTERNAL_PORT]
+              [--awg-listen-port AWG_LISTEN_PORT] [--awg-panel-port AWG_PANEL_PORT]
+              [--tailscale-auth-key TAILSCALE_AUTH_KEY]
+              [--tailscale-hostname TAILSCALE_HOSTNAME]
+              [--tailscale-extra-args TAILSCALE_EXTRA_ARGS]
+              [--incoming-ip INCOMING_IP] [--outgoing-ip OUTGOING_IP]
+              [--public-ipv4 PUBLIC_IPV4] [--public-ipv6 PUBLIC_IPV6]
+              [--tls-versions TLS_VERSIONS] [--skip-certbot] [--https-port HTTPS_PORT]
+              [--approved-ips APPROVED_IPS] [--approved-hostnames APPROVED_HOSTNAMES]
+              [--ssh-approved-ips SSH_APPROVED_IPS]
+              [--ssh-approved-hostnames SSH_APPROVED_HOSTNAMES]
+              [--hostname-resolve-interval-min HOSTNAME_RESOLVE_INTERVAL_MIN]
+              [--blocked-as-numbers BLOCKED_AS_NUMBERS]
+              [--blocked-subnets BLOCKED_SUBNETS]
+              [--blocklist-update-interval-hours BLOCKLIST_UPDATE_INTERVAL_HOURS]
+              [--forwarding-enabled FORWARDING_ENABLED] [--tunnel-type TUNNEL_TYPE]
+              [--secondary-vm-ip SECONDARY_VM_IP]
+              [--reverse-initiated REVERSE_INITIATED]
+              [--forwarding-ports FORWARDING_PORTS]
+              [--reconnect-initial-delay-sec RECONNECT_INITIAL_DELAY_SEC]
+              [--reconnect-max-delay-sec RECONNECT_MAX_DELAY_SEC]
+              [--xray-initial-client XRAY_INITIAL_CLIENT]
+              [--awg-initial-peer AWG_INITIAL_PEER]
+              [--output-dir OUTPUT_DIR] [--deployment-log-path DEPLOYMENT_LOG_PATH]
+
+CLI deployer for multiple anti-censorship VPN services on a single Linux VM.
+
+options:
+  -h, --help            show this help message and exit
+  --version             show program's version number and exit
+  --env-file ENV_FILE   Path to the .env configuration file (default: .env)
+  --dry-run             Generate configuration files without deploying
+  --debug               Enable verbose debug logging
+
+See the full parameter reference above for all flags and their corresponding
+environment variables.
+```
 
 ## Running tests
 
