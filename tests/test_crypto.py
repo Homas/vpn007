@@ -144,15 +144,15 @@ class TestAwgObfuscation:
         assert len(h_set) == 4, f"H values must be distinct, got {h_set}"
 
     @given(st.integers(min_value=1, max_value=100))
-    def test_awg_i_values_in_range(self, _n: int) -> None:
-        """I1–I5 must be in [0, 1280]."""
+    def test_awg_i_values_are_webrtc_defaults(self, _n: int) -> None:
+        """I1-I3 must be WebRTC/STUN CPS signatures by default, I4-I5 empty."""
         awg = generate_awg_obfuscation()
 
-        for name, val in [
-            ("i1", awg.i1), ("i2", awg.i2), ("i3", awg.i3),
-            ("i4", awg.i4), ("i5", awg.i5),
-        ]:
-            assert 0 <= val <= 1280, f"{name}={val} out of range [0, 1280]"
+        assert awg.i1 == "<b 0x000100002112a442><r 12>", f"I1 should be STUN Binding Request, got {awg.i1!r}"
+        assert awg.i2 == "<b 0x0101><r 4><t><r 8>", f"I2 should be STUN follow-up, got {awg.i2!r}"
+        assert awg.i3 == "<r 32>", f"I3 should be random entropy, got {awg.i3!r}"
+        assert awg.i4 == "", f"I4 should be empty, got {awg.i4!r}"
+        assert awg.i5 == "", f"I5 should be empty, got {awg.i5!r}"
 
     @given(st.integers(min_value=1, max_value=100))
     def test_awg_jc_in_range(self, _n: int) -> None:

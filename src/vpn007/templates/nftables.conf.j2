@@ -54,8 +54,13 @@ table inet filter {
         ip saddr @blocked_v4 drop
         ip6 saddr @blocked_v6 drop
 
-        # Allow SSH from approved IPs only
+{% if ssh_approved_ips or ssh_approved_hostnames %}
+        # Allow SSH from approved IPs only (static + resolved hostnames)
         ip saddr @approved_ssh_v4 tcp dport 22 accept
+{% else %}
+        # Allow SSH from any source (no SSH_APPROVED_IPS or SSH_APPROVED_HOSTNAMES configured)
+        tcp dport 22 accept
+{% endif %}
 
         # Allow HTTPS on port {{ https_port }}
         tcp dport {{ https_port }} accept

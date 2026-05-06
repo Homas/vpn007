@@ -287,7 +287,7 @@ class TestGenerateDocs:
         config = DeployConfig(
             domain="vpn.example.com",
             awg_obfuscation=AwgObfuscation(
-                s1=30, s2=80, s3=40, s4=100,
+                s1=30, s2=80, s3=40, s4=20,
                 h1=100, h2=200, h3=300, h4=400,
                 jc=4, jmin=50, jmax=1000,
             ),

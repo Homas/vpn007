@@ -200,6 +200,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Comma-separated list of approved IPs/CIDRs for SSH access",
     )
     acl.add_argument(
+        "--ssh-approved-hostnames",
+        default=None,
+        help="Comma-separated list of hostnames for SSH access (resolved periodically)",
+    )
+    acl.add_argument(
         "--hostname-resolve-interval-min",
         type=int,
         default=None,

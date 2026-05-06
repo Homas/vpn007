@@ -160,10 +160,20 @@ class TestProperty10NftablesDefaultDeny:
         assert f"udp dport {config.awg_listen_port} accept" in output
 
     @given(config=valid_deploy_config)
-    def test_ssh_restricted_to_approved_set(self, config: DeployConfig) -> None:
-        """SSH must be allowed only from the approved_ssh_v4 set."""
-        output = generate_nftables_config(config)
+    def test_ssh_access_rule_present(self, config: DeployConfig) -> None:
+        """SSH must be allowed — restricted to set when IPs configured, open otherwise."""
+        from dataclasses import replace
+
+        # When ssh_approved_ips is set, SSH is restricted to the set
+        config_restricted = replace(config, ssh_approved_ips=["203.0.113.50"])
+        output = generate_nftables_config(config_restricted)
         assert "ip saddr @approved_ssh_v4 tcp dport 22 accept" in output
+
+        # When ssh_approved_ips is empty and no ssh hostnames, SSH is open
+        config_open = replace(config, ssh_approved_ips=[], ssh_approved_hostnames=[])
+        output_open = generate_nftables_config(config_open)
+        assert "tcp dport 22 accept" in output_open
+        assert "ip saddr @approved_ssh_v4 tcp dport 22 accept" not in output_open
 
     @given(config=valid_deploy_config)
     def test_port_80_not_in_base_rules(self, config: DeployConfig) -> None:

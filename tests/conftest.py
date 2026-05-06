@@ -66,23 +66,22 @@ valid_awg_obfuscation = (
         s1=st.integers(15, 150),
         s2=st.integers(15, 150),
         s3=st.integers(15, 150),
-        s4=st.integers(15, 150),
+        s4=st.integers(0, 32),
         h1=st.integers(5, 2147483647),
         h2=st.integers(5, 2147483647),
         h3=st.integers(5, 2147483647),
         h4=st.integers(5, 2147483647),
         jc=st.integers(1, 128),
-        jmin=st.integers(1, 1279),
+        jmin=st.integers(0, 1279),
         jmax=st.integers(1, 1280),
-        i1=st.integers(0, 1280),
-        i2=st.integers(0, 1280),
-        i3=st.integers(0, 1280),
-        i4=st.integers(0, 1280),
-        i5=st.integers(0, 1280),
+        i1=st.just(""),
+        i2=st.just(""),
+        i3=st.just(""),
+        i4=st.just(""),
+        i5=st.just(""),
     )
-    .filter(lambda o: o.jmin <= o.jmax)
+    .filter(lambda o: o.jmin < o.jmax)
     .filter(lambda o: o.s1 + 56 != o.s2 and o.s2 + 56 != o.s1)
-    .filter(lambda o: o.s3 + 56 != o.s4 and o.s4 + 56 != o.s3)
     .filter(lambda o: len({o.h1, o.h2, o.h3, o.h4}) == 4)  # H values must be distinct
 )
 
@@ -124,6 +123,7 @@ valid_deploy_config = st.builds(
     approved_ips=st.lists(valid_ipv4, max_size=5),
     approved_hostnames=st.lists(valid_domain, max_size=3),
     ssh_approved_ips=st.lists(valid_ipv4, max_size=3),
+    ssh_approved_hostnames=st.lists(valid_domain, max_size=2),
     hostname_resolve_interval_min=st.integers(1, 1440),
     blocked_as_numbers=st.lists(valid_as_number, max_size=5),
     blocked_subnets=st.lists(valid_cidr, max_size=5),
@@ -193,10 +193,10 @@ def valid_config_full() -> DeployConfig:
         xray_internal_port=10443,
         awg_listen_port=34567,
         awg_obfuscation=AwgObfuscation(
-            s1=30, s2=80, s3=40, s4=100,
+            s1=30, s2=80, s3=40, s4=20,
             h1=100, h2=200, h3=300, h4=400,
             jc=4, jmin=50, jmax=1000,
-            i1=10, i2=20, i3=30, i4=40, i5=50,
+            i1="", i2="", i3="", i4="", i5="",
         ),
         awg_panel_port=51821,
         tailscale_auth_key="tskey-auth-example1234567890",

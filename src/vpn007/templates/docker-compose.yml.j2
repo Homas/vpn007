@@ -76,11 +76,21 @@ services:
       - AWG_JC={{ awg_obfuscation.jc }}
       - AWG_JMIN={{ awg_obfuscation.jmin }}
       - AWG_JMAX={{ awg_obfuscation.jmax }}
+{% if awg_obfuscation.i1 %}
       - AWG_I1={{ awg_obfuscation.i1 }}
+{% endif %}
+{% if awg_obfuscation.i2 %}
       - AWG_I2={{ awg_obfuscation.i2 }}
+{% endif %}
+{% if awg_obfuscation.i3 %}
       - AWG_I3={{ awg_obfuscation.i3 }}
+{% endif %}
+{% if awg_obfuscation.i4 %}
       - AWG_I4={{ awg_obfuscation.i4 }}
+{% endif %}
+{% if awg_obfuscation.i5 %}
       - AWG_I5={{ awg_obfuscation.i5 }}
+{% endif %}
 {% endif %}
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1

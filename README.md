@@ -186,18 +186,39 @@ Obfuscation parameters (env vars only — provide all or none for auto-generatio
 
 | Env var | Range | Description |
 |---------|-------|-------------|
-| `AWG_S1` | 15-150 | Init packet magic header |
-| `AWG_S2` | 15-150 | Response packet magic header |
-| `AWG_S3` | 15-150 | Init packet junk size (2.0) |
-| `AWG_S4` | 15-150 | Response packet junk size (2.0) |
-| `AWG_H1` | 5-2147483647 | Header transform param 1 |
-| `AWG_H2` | 5-2147483647 | Header transform param 2 |
-| `AWG_H3` | 5-2147483647 | Header transform param 3 |
-| `AWG_H4` | 5-2147483647 | Header transform param 4 |
-| `AWG_JC` | 1-128 | Junk packet count (default: 4) |
-| `AWG_JMIN` | 1-1280 | Min junk packet size (default: 50) |
-| `AWG_JMAX` | 1-1280 | Max junk packet size (default: 1000) |
-| `AWG_I1`–`AWG_I5` | 0-1280 | Init packet junk sizes (default: 0) |
+| `AWG_S1` | 0-1132 (rec. 15-150) | Random prefix for Init packets |
+| `AWG_S2` | 0-1188 (rec. 15-150) | Random prefix for Response packets |
+| `AWG_S3` | 0-1216 (rec. 15-150) | Random prefix for Cookie packets |
+| `AWG_S4` | 0-32 | Random prefix for Data packets |
+| `AWG_H1` | 5-2147483647 | Dynamic header for Init packets |
+| `AWG_H2` | 5-2147483647 | Dynamic header for Response packets |
+| `AWG_H3` | 5-2147483647 | Dynamic header for Cookie packets |
+| `AWG_H4` | 5-2147483647 | Dynamic header for Data packets |
+| `AWG_JC` | 1-128 (rec. 4-10) | Junk packet count |
+| `AWG_JMIN` | 0-1280 | Min junk packet size (default: 50) |
+| `AWG_JMAX` | 0-1280 | Max junk packet size (default: 1000) |
+
+CPS signature packets (protocol imitation — makes traffic look like a known UDP protocol):
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `AWG_I1` | `<b 0x000100002112a442><r 12>` | STUN Binding Request (WebRTC) |
+| `AWG_I2` | `<b 0x0101><r 4><t><r 8>` | STUN follow-up with timestamp |
+| `AWG_I3` | `<r 32>` | Random entropy packet |
+| `AWG_I4` | *(empty)* | Optional additional signature |
+| `AWG_I5` | *(empty)* | Optional additional signature |
+
+The default I1-I3 signatures mimic WebRTC/STUN traffic (video call signaling). This is the most effective protocol for bypassing DPI because STUN is used by Google Meet, Zoom, Teams, and every WebRTC application — blocking it would break video conferencing.
+
+Alternative I1 signatures for different scenarios:
+
+| Protocol | CPS value | When to use |
+|----------|-----------|-------------|
+| **WebRTC/STUN** (default) | `<b 0x000100002112a442><r 12>` | Best general-purpose choice |
+| **DNS response** | `<r 2><b 0x8580000100010000000004796162730679616e6465780272750000010001c00c000100010000026d000457fa27d1>` | If STUN is throttled |
+| **QUIC Initial** | Capture with Wireshark, wrap in `<b 0x...>` | Maximum stealth (unique per server) |
+
+CPS format tags: `<b 0xHEX>` static bytes, `<r N>` random bytes, `<t>` timestamp, `<rc N>` random letters, `<rd N>` random digits.
 
 #### Tailscale
 
@@ -230,12 +251,24 @@ ECH/ESNI extensions are never advertised (blocked by Russia's TSPU since Novembe
 
 #### Access control
 
+Two independent access control layers:
+
+**Panel access** (Nginx `allow`/`deny` — controls 3x-ui and AmneziaWG web panels):
+
 | Flag | Env var | Default | Description |
 |------|---------|---------|-------------|
-| `--approved-ips` | `APPROVED_IPS` | *(required)* | IPs/CIDRs allowed to access web panels |
+| `--approved-ips` | `APPROVED_IPS` | *(empty)* | IPs/CIDRs allowed to access management panels |
 | `--approved-hostnames` | `APPROVED_HOSTNAMES` | *(empty)* | Hostnames resolved periodically for panel access |
-| `--ssh-approved-ips` | `SSH_APPROVED_IPS` | *(required)* | IPs allowed to SSH into the VM |
 | `--hostname-resolve-interval-min` | `HOSTNAME_RESOLVE_INTERVAL_MIN` | `30` | Re-resolve interval in minutes |
+
+**SSH access** (nftables port 22 — independent of panel access):
+
+| Flag | Env var | Default | Description |
+|------|---------|---------|-------------|
+| `--ssh-approved-ips` | `SSH_APPROVED_IPS` | *(empty — open to all)* | IPs allowed to SSH (restricts when set) |
+| `--ssh-approved-hostnames` | `SSH_APPROVED_HOSTNAMES` | *(empty)* | Hostnames resolved periodically for SSH access |
+
+When both `SSH_APPROVED_IPS` and `SSH_APPROVED_HOSTNAMES` are empty, SSH is open from all networks. As soon as either is set, SSH is restricted to those addresses only.
 
 #### Firewall / blocking
 
@@ -358,6 +391,78 @@ nft list ruleset
 systemctl list-timers 'blocklist*' 'hostname*' 'certbot*'
 ```
 
+### Firewall management script (`vpn007-fw.sh`)
+
+A standalone shell script for managing blocked/allowed IPs, subnets, and AS numbers in the running nftables firewall without regenerating the full config.
+
+**Install on the server:**
+
+```bash
+cp scripts/vpn007-fw.sh /usr/local/bin/vpn007-fw
+chmod +x /usr/local/bin/vpn007-fw
+```
+
+**Block/unblock IPs and subnets:**
+
+```bash
+# Block a single IP
+sudo vpn007-fw block ip 192.168.1.100
+
+# Block a subnet
+sudo vpn007-fw block ip 10.0.0.0/8
+
+# Unblock
+sudo vpn007-fw unblock ip 192.168.1.100
+```
+
+**Block/unblock entire Autonomous Systems:**
+
+```bash
+# Block all prefixes announced by an AS (resolves automatically)
+sudo vpn007-fw block as AS196747
+
+# Unblock
+sudo vpn007-fw unblock as AS196747
+
+# Dry-run: see what prefixes an AS announces without blocking
+vpn007-fw resolve as AS196747
+```
+
+**Manage SSH access:**
+
+```bash
+# Allow SSH from a new IP
+sudo vpn007-fw allow ssh 203.0.113.50
+
+# Revoke SSH access
+sudo vpn007-fw deny ssh 203.0.113.50
+```
+
+**Manage web panel access:**
+
+```bash
+# Allow panel access from a new IP (updates Nginx and reloads)
+sudo vpn007-fw allow panel 10.0.0.5
+
+# Revoke panel access
+sudo vpn007-fw deny panel 10.0.0.5
+```
+
+**List current rules:**
+
+```bash
+# Show everything
+sudo vpn007-fw list
+
+# Show only blocked IPs/subnets
+sudo vpn007-fw list blocked
+
+# Show SSH-approved IPs
+sudo vpn007-fw list ssh
+```
+
+Changes made via `vpn007-fw` are applied immediately to the running nftables ruleset. They persist until the next `nft flush ruleset` or reboot. To make changes permanent, also update your `.env` file and re-run the deployer, or save the current ruleset with `nft list ruleset > /etc/nftables.conf`.
+
 ### TLS certificate management
 
 On first deploy, Nginx starts with a self-signed certificate. The deployer then:
@@ -385,6 +490,81 @@ vpn007 --domain lab.local \
 
 This generates configs with a self-signed cert on port 8443, suitable for local testing.
 
+### Low-memory deployment (1 GB RAM)
+
+The full stack runs on 1 GB RAM for light usage (1-10 concurrent clients). Typical memory breakdown:
+
+| Component | RAM usage |
+|-----------|-----------|
+| OS + systemd + nftables | ~100-150 MB |
+| Docker daemon | ~100-150 MB |
+| Nginx (reverse_proxy + cover_site) | ~20-30 MB |
+| 3x-ui + Xray | ~80-120 MB |
+| wg-easy (AmneziaWG) | ~50-80 MB |
+| Tailscale | ~30-50 MB |
+| **Total (typical)** | **~400-580 MB** |
+
+The 2 GB recommendation accounts for spikes during Docker image pulls, cert renewals, and many concurrent clients. To run comfortably on 1 GB:
+
+**1. Add swap (most impactful, no trade-off):**
+
+```bash
+fallocate -l 1G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab
+```
+
+**2. Limit Docker log memory:**
+
+```bash
+cat > /etc/docker/daemon.json << 'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" }
+}
+EOF
+systemctl restart docker
+```
+
+**3. (Optional) Drop Tailscale** if you don't need mesh management — saves ~40 MB:
+
+```bash
+# Start only the services you need
+docker compose up -d reverse_proxy three_x_ui amneziawg cover_site
+```
+
+**4. Use static cover site mode** — proxy mode enables Nginx caching which uses additional RAM.
+
+**5. (Optional) Drop 3x-ui** if you only need AmneziaWG — 3x-ui is the heaviest container. You can pre-configure Xray with a static `config.json` and run a standalone `teddysun/xray` container instead, but you lose the web panel.
+
+**What to expect on 1 GB + 1 GB swap:**
+- Normal operation: fine for 1-10 concurrent VPN clients
+- `docker compose pull`: may use swap briefly (image decompression spikes)
+- Certbot renewal: brief spike, handled by swap
+- Don't go below 1 GB without removing at least one service
+
+### SSH access security
+
+SSH access behavior depends on whether `SSH_APPROVED_IPS` or `SSH_APPROVED_HOSTNAMES` is configured:
+
+| Configuration | Behavior |
+|---------------|----------|
+| Both empty (default) | SSH open from all networks |
+| `SSH_APPROVED_IPS=203.0.113.50` | SSH restricted to listed IPs only |
+| `SSH_APPROVED_HOSTNAMES=admin.example.com` | SSH restricted to resolved IPs only |
+| Both set | SSH restricted to combined static IPs + resolved hostnames |
+
+When restricted, the nftables firewall only allows port 22 from addresses in the `approved_ssh_v4` set. The hostname resolver periodically re-resolves `SSH_APPROVED_HOSTNAMES` and updates the nftables set atomically (same interval as panel hostname resolution).
+
+This is completely independent of panel access (`APPROVED_IPS` / `APPROVED_HOSTNAMES`), which is enforced at the Nginx level.
+
+Recommendations:
+- For production, set `SSH_APPROVED_IPS` or `SSH_APPROVED_HOSTNAMES` to reduce attack surface
+- For operators with dynamic IPs, use `SSH_APPROVED_HOSTNAMES` with a DDNS hostname
+- Tailscale provides out-of-band management access regardless of firewall rules (it uses its own overlay network)
+
 ## Inter-VM forwarding (relay architecture)
 
 This section explains how to set up a two-VM relay where **VM-A** (entrance node) accepts VPN client connections and forwards traffic through an encrypted tunnel to **VM-B** (exit node), which routes it to the internet. This separates the entry point from the exit point for improved privacy and censorship resistance.
@@ -406,6 +586,28 @@ This section explains how to set up a two-VM relay where **VM-A** (entrance node
 - **VM-A** runs the full VPN007 stack (Nginx, Xray, AmneziaWG, Tailscale, cover site) and accepts client connections on ports 443/UDP.
 - **VM-B** is a lightweight exit node that receives forwarded traffic from VM-A over an encrypted tunnel and routes it to the internet.
 - The deployer generates a standalone Python script (`forwarding-install.py`) that you run on VM-B to set up its side of the tunnel.
+
+### Hardware requirements for VM-B (exit node)
+
+VM-B only runs a tunnel endpoint and NAT — no Docker, no web panels, no TLS termination.
+
+| Resource | Minimum | Recommended |
+|----------|---------|-------------|
+| CPU | 1 vCPU | 1+ vCPU |
+| RAM | 512 MB | 1 GB |
+| Disk | 5 GB | 10 GB |
+| OS | Debian 11+ / Ubuntu 22.04+ / Alpine 3.18+ | Same |
+
+VM-B's bandwidth is the bottleneck for client internet speed. Choose a VM-B with good network throughput in the geographic location you want traffic to exit from.
+
+### Failure behavior (fail closed)
+
+If the tunnel between VM-A and VM-B goes down:
+
+- **Traffic is dropped, not leaked.** Forwarding uses nftables DNAT rules pointing to the tunnel peer IP (e.g., `10.99.0.2`). When the tunnel is down, that IP is unreachable — packets are silently dropped.
+- **Clients see a connection timeout**, not a fallback to VM-A's own internet connection. No traffic ever exits from VM-A's public IP.
+- **Reconnection is automatic.** The tunnel daemon retries with exponential backoff (default: 5s → 10s → 20s → ... → 300s max). Once the tunnel re-establishes, forwarding resumes immediately.
+- **This is fail-closed by design** — it protects against accidental IP leaks. If you need fail-open behavior (fall back to VM-A's exit when VM-B is unreachable), you would need to add a custom health-check script that removes the DNAT rules on tunnel failure. This is not provided by default because it compromises the privacy guarantee of the relay architecture.
 
 ### Supported tunnel types
 
@@ -631,6 +833,164 @@ python3 /root/forwarding-install.py
 | Intermittent drops | Check reconnection logs; increase `RECONNECT_MAX_DELAY_SEC` |
 | VM-B can't reach internet | Verify IP forwarding is enabled (`sysctl net.ipv4.ip_forward`) |
 | Reverse tunnel fails | Ensure VM-A's SSH/WG port is open in its firewall for VM-B's IP |
+
+### Converting from two-node relay back to single-node
+
+If you no longer need the relay architecture and want all traffic to enter and exit from a single VM, follow these steps.
+
+#### Scenario A: Keep VM-A as the single node (same IP for ingress and egress)
+
+VM-A already runs the full VPN007 stack. You just need to disable forwarding and remove the tunnel.
+
+**On VM-A:**
+
+1. Update `.env`:
+
+```bash
+# Disable forwarding
+FORWARDING_ENABLED=false
+
+# Remove or comment out these:
+# TUNNEL_TYPE=
+# SECONDARY_VM_IP=
+# FORWARDING_PORTS=
+```
+
+2. Re-run the deployer to regenerate configs without forwarding rules:
+
+```bash
+sudo vpn007
+# or dry-run + manual apply:
+vpn007 --dry-run
+nft -f deploy/nftables.conf
+```
+
+3. Remove the tunnel interface (if WireGuard was used):
+
+```bash
+wg-quick down wg-tunnel   # or whatever the interface was named
+rm /etc/wireguard/wg-tunnel.conf
+```
+
+4. Verify traffic now exits from VM-A's own IP:
+
+```bash
+# From a connected VPN client
+curl -4 ifconfig.me   # Should show VM-A's public IP
+```
+
+**On VM-B (decommission):**
+
+```bash
+# Remove the tunnel
+wg-quick down wg-tunnel
+rm /etc/wireguard/wg-tunnel.conf
+
+# Remove forwarding rules
+nft flush table ip nat
+
+# Disable IP forwarding
+sysctl -w net.ipv4.ip_forward=0
+
+# (Optional) Shut down the VM entirely
+```
+
+#### Scenario B: Keep VM-A with separate ingress/egress IPs (multi-IP single node)
+
+If VM-A has multiple IP addresses and you want incoming VPN connections on one IP and outbound internet traffic from a different IP — all on the same machine:
+
+1. Update `.env`:
+
+```bash
+# Disable forwarding (no more VM-B)
+FORWARDING_ENABLED=false
+
+# Configure multi-IP on the single VM
+INCOMING_IP=10.0.0.2       # Private IP bound to the interface (for Nginx bind)
+OUTGOING_IP=10.0.0.3       # Different private IP for outbound SNAT
+PUBLIC_IPV4=203.0.113.10   # Public IP clients connect to
+```
+
+2. Ensure both IPs are assigned to the VM's network interface:
+
+```bash
+# Verify IPs are present
+ip addr show
+
+# If the outgoing IP isn't assigned, add it:
+ip addr add 10.0.0.3/24 dev eth0
+# Make persistent via /etc/network/interfaces or netplan
+```
+
+3. Re-deploy:
+
+```bash
+sudo vpn007
+```
+
+The generated `nftables.conf` will include a SNAT rule in the postrouting chain that rewrites the source IP of outbound traffic to `OUTGOING_IP`. Incoming connections arrive on `INCOMING_IP`, outbound exits from `OUTGOING_IP`.
+
+4. Verify:
+
+```bash
+# Check the SNAT rule
+nft list table ip nat
+# Should show: oifname "eth0" snat to 10.0.0.3
+
+# From a VPN client
+curl -4 ifconfig.me   # Should show the public IP mapped to OUTGOING_IP
+```
+
+#### Scenario C: Migrate everything to VM-B (new single node)
+
+If you want to decommission VM-A and run the full stack on VM-B instead:
+
+1. On VM-B, install the VPN007 prerequisites (Docker, nftables, Python 3.12+)
+
+2. Copy your `.env` from VM-A and update it:
+
+```bash
+# Disable forwarding
+FORWARDING_ENABLED=false
+
+# Update IPs to VM-B's addresses
+PUBLIC_IPV4=198.51.100.20
+# INCOMING_IP=...  (if needed)
+# OUTGOING_IP=...  (if needed)
+
+# Update DNS: point your DOMAIN to VM-B's IP
+```
+
+3. Deploy on VM-B:
+
+```bash
+sudo vpn007
+```
+
+4. Update DNS records to point `DOMAIN` to VM-B's public IP.
+
+5. Decommission VM-A:
+
+```bash
+# On VM-A
+docker compose down
+# Remove systemd timers
+systemctl disable --now blocklist-updater.timer hostname-resolver.timer certbot-renew.timer
+```
+
+#### Cleanup checklist
+
+After converting to single-node, ensure these are cleaned up:
+
+| Item | VM-A | VM-B |
+|------|------|------|
+| Tunnel interface (wg-tunnel) | Remove | Remove |
+| Tunnel config (/etc/wireguard/wg-tunnel.conf) | Remove | Remove |
+| DNAT/SNAT forwarding rules in nftables | Removed by re-deploy | Flush manually |
+| autossh service (if SSH tunnel) | Stop + disable | Stop + disable |
+| Tailscale routes (if Tailscale tunnel) | Remove `--accept-routes` | Remove |
+| forwarding-install.py on VM-B | — | Delete |
+| IP forwarding sysctl on VM-B | — | Set to 0 |
 
 ## Running tests
 

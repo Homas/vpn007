@@ -186,27 +186,43 @@ def _is_valid_as_number(value: str) -> bool:
 
 
 def _validate_awg_obfuscation(obf: AwgObfuscation) -> list[str]:
-    """Validate AmneziaWG 2.0 obfuscation parameter ranges and constraints."""
+    """Validate AmneziaWG 2.0 obfuscation parameter ranges and constraints.
+
+    Ranges per official AmneziaWG documentation:
+    - S1: 0-1132 (random prefix for Init packets)
+    - S2: 0-1188 (random prefix for Response packets)
+    - S3: 0-1216 (random prefix for Cookie packets)
+    - S4: 0-32 (random prefix for Data packets)
+    - H1-H4: 5-2147483647, all distinct (non-overlapping)
+    - Jc: 1-128
+    - Jmin/Jmax: 0-1280, Jmin < Jmax
+    - I1-I5: optional CPS format strings (not validated here)
+    """
     errors: list[str] = []
 
-    # S1-S4: 15-150
-    for name, val in [("S1", obf.s1), ("S2", obf.s2), ("S3", obf.s3), ("S4", obf.s4)]:
-        if not (15 <= val <= 150):
-            errors.append(f"AWG {name} must be 15-150, got {val}")
+    # S1: 0-1132
+    if not (0 <= obf.s1 <= 1132):
+        errors.append(f"AWG S1 must be 0-1132, got {obf.s1}")
 
-    # Bidirectional constraints: S1+56 != S2 and S2+56 != S1
+    # S2: 0-1188, with constraint S1+56 != S2
+    if not (0 <= obf.s2 <= 1188):
+        errors.append(f"AWG S2 must be 0-1188, got {obf.s2}")
+
+    # S3: 0-1216
+    if not (0 <= obf.s3 <= 1216):
+        errors.append(f"AWG S3 must be 0-1216, got {obf.s3}")
+
+    # S4: 0-32
+    if not (0 <= obf.s4 <= 32):
+        errors.append(f"AWG S4 must be 0-32, got {obf.s4}")
+
+    # Bidirectional constraint: S1+56 != S2 and S2+56 != S1
     if obf.s1 + 56 == obf.s2:
         errors.append(f"AWG S1+56 must not equal S2 ({obf.s1}+56 == {obf.s2})")
     if obf.s2 + 56 == obf.s1:
         errors.append(f"AWG S2+56 must not equal S1 ({obf.s2}+56 == {obf.s1})")
 
-    # Bidirectional constraints: S3+56 != S4 and S4+56 != S3
-    if obf.s3 + 56 == obf.s4:
-        errors.append(f"AWG S3+56 must not equal S4 ({obf.s3}+56 == {obf.s4})")
-    if obf.s4 + 56 == obf.s3:
-        errors.append(f"AWG S4+56 must not equal S3 ({obf.s4}+56 == {obf.s3})")
-
-    # H1-H4: 5-2147483647, non-overlapping ranges
+    # H1-H4: 5-2147483647, all distinct
     for name, val in [("H1", obf.h1), ("H2", obf.h2), ("H3", obf.h3), ("H4", obf.h4)]:
         if not (5 <= val <= 2147483647):
             errors.append(f"AWG {name} must be 5-2147483647, got {val}")
@@ -220,24 +236,16 @@ def _validate_awg_obfuscation(obf: AwgObfuscation) -> list[str]:
                     f"(both are {h_values[i][1]})"
                 )
 
-    # I1-I5: 0-1280
-    for name, val in [
-        ("I1", obf.i1), ("I2", obf.i2), ("I3", obf.i3),
-        ("I4", obf.i4), ("I5", obf.i5),
-    ]:
-        if not (0 <= val <= 1280):
-            errors.append(f"AWG {name} must be 0-1280, got {val}")
-
     # Jc: 1-128
     if not (1 <= obf.jc <= 128):
         errors.append(f"AWG Jc must be 1-128, got {obf.jc}")
 
-    # Jmin <= Jmax <= 1280
-    if obf.jmin > obf.jmax:
-        errors.append(f"AWG Jmin must be <= Jmax ({obf.jmin} > {obf.jmax})")
+    # Jmin < Jmax, both 0-1280
+    if obf.jmin >= obf.jmax:
+        errors.append(f"AWG Jmin must be < Jmax ({obf.jmin} >= {obf.jmax})")
     if obf.jmax > 1280:
         errors.append(f"AWG Jmax must be <= 1280, got {obf.jmax}")
-    if obf.jmin < 1:
-        errors.append(f"AWG Jmin must be >= 1, got {obf.jmin}")
+    if obf.jmin < 0:
+        errors.append(f"AWG Jmin must be >= 0, got {obf.jmin}")
 
     return errors

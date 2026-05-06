@@ -156,6 +156,7 @@ _ENV_FIELD_MAP: list[tuple[str, str, type | object]] = [
     ("APPROVED_IPS", "approved_ips", _parse_comma_list),
     ("APPROVED_HOSTNAMES", "approved_hostnames", _parse_comma_list),
     ("SSH_APPROVED_IPS", "ssh_approved_ips", _parse_comma_list),
+    ("SSH_APPROVED_HOSTNAMES", "ssh_approved_hostnames", _parse_comma_list),
     ("HOSTNAME_RESOLVE_INTERVAL_MIN", "hostname_resolve_interval_min", int),
     # AS/Subnet blocking
     ("BLOCKED_AS_NUMBERS", "blocked_as_numbers", _parse_comma_list),
@@ -236,11 +237,11 @@ def _parse_awg_obfuscation(env: dict[str, str | None]) -> AwgObfuscation | None:
         jc=_get_int("AWG_JC", default=4),
         jmin=_get_int("AWG_JMIN", default=50),
         jmax=_get_int("AWG_JMAX", default=1000),
-        i1=_get_int("AWG_I1", default=0),
-        i2=_get_int("AWG_I2", default=0),
-        i3=_get_int("AWG_I3", default=0),
-        i4=_get_int("AWG_I4", default=0),
-        i5=_get_int("AWG_I5", default=0),
+        i1=env.get("AWG_I1", "").strip() or "",
+        i2=env.get("AWG_I2", "").strip() or "",
+        i3=env.get("AWG_I3", "").strip() or "",
+        i4=env.get("AWG_I4", "").strip() or "",
+        i5=env.get("AWG_I5", "").strip() or "",
     )
 
 

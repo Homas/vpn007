@@ -27,24 +27,27 @@ class AwgObfuscation:
     """AmneziaWG 2.0 obfuscation parameters."""
 
     # Packet size parameters (must match between server and clients)
-    s1: int  # Init packet magic header (15-150)
-    s2: int  # Response packet magic header (15-150)
-    s3: int  # Init packet junk size (15-150, added in 2.0)
-    s4: int  # Response packet junk size (15-150, added in 2.0)
-    h1: int  # Header transform param 1 (5-2147483647)
-    h2: int  # Header transform param 2 (5-2147483647)
-    h3: int  # Header transform param 3 (5-2147483647)
-    h4: int  # Header transform param 4 (5-2147483647)
+    s1: int  # Random prefix for Init packets (0-1132, recommended 15-150)
+    s2: int  # Random prefix for Response packets (0-1188, recommended 15-150)
+    s3: int  # Random prefix for Cookie packets (0-1216, recommended 15-150)
+    s4: int  # Random prefix for Data packets (0-32)
+    h1: int  # Dynamic header for Init packets (5-2147483647)
+    h2: int  # Dynamic header for Response packets (5-2147483647)
+    h3: int  # Dynamic header for Cookie packets (5-2147483647)
+    h4: int  # Dynamic header for Data packets (5-2147483647)
     # Junk packet parameters (can differ between server and clients)
-    jc: int = 4  # Junk packet count (1-128)
-    jmin: int = 50  # Min junk packet size (1-1280)
-    jmax: int = 1000  # Max junk packet size (1-1280, Jmin <= Jmax)
-    # Init packet junk sizes (added in 2.0, can differ between server and clients)
-    i1: int = 0  # Init packet junk size 1
-    i2: int = 0  # Init packet junk size 2
-    i3: int = 0  # Init packet junk size 3
-    i4: int = 0  # Init packet junk size 4
-    i5: int = 0  # Init packet junk size 5
+    jc: int = 4  # Junk packet count (1-128, recommended 4-10)
+    jmin: int = 50  # Min junk packet size (0-1280)
+    jmax: int = 1000  # Max junk packet size (0-1280, Jmin < Jmax)
+    # CPS signature packets (optional, CPS format hex-blob strings)
+    # These are NOT auto-generated — they require manual configuration
+    # to mimic specific protocols (QUIC, DNS, SIP, etc.)
+    # See: https://docs.amnezia.org/documentation/amnezia-wg/
+    i1: str = ""  # Signature packet 1 (CPS format)
+    i2: str = ""  # Signature packet 2 (CPS format)
+    i3: str = ""  # Signature packet 3 (CPS format)
+    i4: str = ""  # Signature packet 4 (CPS format)
+    i5: str = ""  # Signature packet 5 (CPS format)
 
 
 @dataclass
@@ -165,6 +168,7 @@ class DeployConfig:
     approved_ips: list[str] = field(default_factory=list)
     approved_hostnames: list[str] = field(default_factory=list)
     ssh_approved_ips: list[str] = field(default_factory=list)
+    ssh_approved_hostnames: list[str] = field(default_factory=list)
     hostname_resolve_interval_min: int = 30
 
     # AS/Subnet blocking

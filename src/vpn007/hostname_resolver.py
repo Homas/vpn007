@@ -68,6 +68,8 @@ def generate_hostname_resolver(
     script = script_template.render(
         hostnames=config.approved_hostnames,
         static_ips=config.approved_ips,
+        ssh_hostnames=config.ssh_approved_hostnames,
+        ssh_static_ips=config.ssh_approved_ips,
         nginx_conf_dir=nginx_conf_dir,
         compose_dir=compose_dir,
     )

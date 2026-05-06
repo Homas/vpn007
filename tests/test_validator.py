@@ -39,10 +39,10 @@ def _config(**overrides: object) -> DeployConfig:
 def _valid_awg() -> AwgObfuscation:
     """Return a valid AwgObfuscation instance."""
     return AwgObfuscation(
-        s1=30, s2=80, s3=40, s4=100,
+        s1=30, s2=80, s3=40, s4=20,
         h1=100, h2=200, h3=300, h4=400,
         jc=4, jmin=50, jmax=1000,
-        i1=10, i2=20, i3=30, i4=40, i5=50,
+        i1="", i2="", i3="", i4="", i5="",
     )
 
 
@@ -320,15 +320,15 @@ class TestAwgObfuscationValidation:
 
     def test_s1_below_range(self) -> None:
         obf = _valid_awg()
-        obf.s1 = 14
+        obf.s1 = -1
         errors = validate_config(_config(awg_obfuscation=obf))
-        assert any("S1" in e and "15-150" in e for e in errors)
+        assert any("S1" in e and "0-1132" in e for e in errors)
 
     def test_s2_above_range(self) -> None:
         obf = _valid_awg()
-        obf.s2 = 151
+        obf.s2 = 1189
         errors = validate_config(_config(awg_obfuscation=obf))
-        assert any("S2" in e and "15-150" in e for e in errors)
+        assert any("S2" in e and "0-1188" in e for e in errors)
 
     def test_s1_plus_56_equals_s2(self) -> None:
         obf = _valid_awg()
@@ -344,19 +344,11 @@ class TestAwgObfuscationValidation:
         errors = validate_config(_config(awg_obfuscation=obf))
         assert any("S2+56" in e for e in errors)
 
-    def test_s3_plus_56_equals_s4(self) -> None:
+    def test_s4_above_range(self) -> None:
         obf = _valid_awg()
-        obf.s3 = 30
-        obf.s4 = 86  # 30 + 56 = 86
+        obf.s4 = 33
         errors = validate_config(_config(awg_obfuscation=obf))
-        assert any("S3+56" in e for e in errors)
-
-    def test_s4_plus_56_equals_s3(self) -> None:
-        obf = _valid_awg()
-        obf.s4 = 30
-        obf.s3 = 86  # 30 + 56 = 86
-        errors = validate_config(_config(awg_obfuscation=obf))
-        assert any("S4+56" in e for e in errors)
+        assert any("S4" in e and "0-32" in e for e in errors)
 
     def test_h_below_range(self) -> None:
         obf = _valid_awg()
@@ -370,18 +362,6 @@ class TestAwgObfuscationValidation:
         obf.h2 = 100  # same as h1
         errors = validate_config(_config(awg_obfuscation=obf))
         assert any("H1" in e and "H2" in e and "overlap" in e for e in errors)
-
-    def test_i_below_range(self) -> None:
-        obf = _valid_awg()
-        obf.i1 = -1
-        errors = validate_config(_config(awg_obfuscation=obf))
-        assert any("I1" in e and "0-1280" in e for e in errors)
-
-    def test_i_above_range(self) -> None:
-        obf = _valid_awg()
-        obf.i3 = 1281
-        errors = validate_config(_config(awg_obfuscation=obf))
-        assert any("I3" in e and "0-1280" in e for e in errors)
 
     def test_jc_below_range(self) -> None:
         obf = _valid_awg()
@@ -408,11 +388,11 @@ class TestAwgObfuscationValidation:
         errors = validate_config(_config(awg_obfuscation=obf))
         assert any("Jmax" in e and "1280" in e for e in errors)
 
-    def test_jmin_below_1(self) -> None:
+    def test_jmin_below_0(self) -> None:
         obf = _valid_awg()
-        obf.jmin = 0
+        obf.jmin = -1
         errors = validate_config(_config(awg_obfuscation=obf))
-        assert any("Jmin" in e and ">= 1" in e for e in errors)
+        assert any("Jmin" in e and ">= 0" in e for e in errors)
 
     def test_none_obfuscation_is_valid(self) -> None:
         errors = validate_config(_config(awg_obfuscation=None))
@@ -883,18 +863,18 @@ class TestProperty2InvalidAwgObfuscation:
 
     @given(
         config=valid_deploy_config,
-        s_val=st.one_of(st.integers(max_value=14), st.integers(min_value=151, max_value=500)),
+        s_val=st.one_of(st.integers(max_value=-1), st.integers(min_value=1133, max_value=5000)),
     )
     @h_settings(max_examples=100)
     def test_s_param_out_of_range_rejected(
         self, config: DeployConfig, s_val: int
     ) -> None:
-        """S1-S4 must be 15-150; any value outside is rejected."""
+        """S1 must be 0-1132; any value outside is rejected."""
         obf = _valid_awg()
         obf.s1 = s_val
         config.awg_obfuscation = obf
         errors = validate_config(config)
-        assert any("S1" in e and "15-150" in e for e in errors), (
+        assert any("S1" in e and "0-1132" in e for e in errors), (
             f"Expected S1 range error for {s_val}, got: {errors}"
         )
 
@@ -930,15 +910,14 @@ class TestProperty2InvalidAwgObfuscation:
 
     @given(config=valid_deploy_config)
     @h_settings(max_examples=50)
-    def test_s3_plus_56_equals_s4_rejected(self, config: DeployConfig) -> None:
-        """The bidirectional constraint S3+56 != S4 must be enforced."""
+    def test_s4_above_range_rejected(self, config: DeployConfig) -> None:
+        """S4 must be 0-32; values above 32 are rejected."""
         obf = _valid_awg()
-        obf.s3 = 30
-        obf.s4 = 86  # 30 + 56 = 86
+        obf.s4 = 33
         config.awg_obfuscation = obf
         errors = validate_config(config)
-        assert any("S3+56" in e for e in errors), (
-            f"Expected S3+56 constraint error, got: {errors}"
+        assert any("S4" in e and "0-32" in e for e in errors), (
+            f"Expected S4 range error for 33, got: {errors}"
         )
 
     @given(config=valid_deploy_config)
@@ -952,23 +931,6 @@ class TestProperty2InvalidAwgObfuscation:
         errors = validate_config(config)
         assert any("overlap" in e.lower() for e in errors), (
             f"Expected H overlap error, got: {errors}"
-        )
-
-    @given(
-        config=valid_deploy_config,
-        i_val=st.one_of(st.integers(max_value=-1), st.integers(min_value=1281, max_value=5000)),
-    )
-    @h_settings(max_examples=100)
-    def test_i_param_out_of_range_rejected(
-        self, config: DeployConfig, i_val: int
-    ) -> None:
-        """I1-I5 must be 0-1280; any value outside is rejected."""
-        obf = _valid_awg()
-        obf.i1 = i_val
-        config.awg_obfuscation = obf
-        errors = validate_config(config)
-        assert any("I1" in e and "0-1280" in e for e in errors), (
-            f"Expected I1 range error for {i_val}, got: {errors}"
         )
 
     @given(

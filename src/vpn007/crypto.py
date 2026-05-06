@@ -84,23 +84,31 @@ def generate_wg_keypair() -> tuple[str, str]:
 def generate_awg_obfuscation() -> AwgObfuscation:
     """Generate random AmneziaWG 2.0 obfuscation parameters.
 
-    All values are within the valid ranges defined by the AmneziaWG 2.0
-    protocol specification:
+    Values follow best practices from the official AmneziaWG documentation
+    (https://docs.amnezia.org/documentation/amnezia-wg/):
 
-    - S1–S4: 15–150, with bidirectional constraints S1+56≠S2, S3+56≠S4
-      (and vice versa)
-    - H1–H4: 5–2147483647, all distinct
-    - I1–I5: 0–1280
-    - Jc: 1–128
-    - Jmin ≤ Jmax, both in range 1–1280
+    - S1: 15–150 (random prefix for Init packets, max 1132 but 15-150 recommended)
+    - S2: 15–150 (random prefix for Response packets, constraint: S1+56≠S2)
+    - S3: 15–150 (random prefix for Cookie packets, max 1216 but 15-150 recommended)
+    - S4: 0–32 (random prefix for Data packets — limited room in data frames)
+    - H1–H4: 5–2147483647, all distinct and non-overlapping ranges
+    - Jc: 4–10 (recommended junk packet count; full range 1-128)
+    - Jmin/Jmax: 50–1000 (practical junk packet sizes; full range 0-1280)
+
+    I1-I3 default to WebRTC/STUN signatures — the most effective protocol
+    for bypassing DPI because STUN is used by all video conferencing apps
+    (Google Meet, Zoom, Teams) and is never blocked.
+
+    CPS format reference: https://docs.amnezia.org/documentation/amnezia-wg/
     """
     s1, s2 = _generate_s_pair()
-    s3, s4 = _generate_s_pair()
+    s3 = random.randint(15, 150)
+    s4 = random.randint(0, 32)
 
     h1, h2, h3, h4 = _generate_distinct_h_values()
 
-    jmin = random.randint(1, 1280)
-    jmax = random.randint(jmin, 1280)
+    jmin = random.randint(50, 500)
+    jmax = random.randint(jmin + 1, 1000)
 
     return AwgObfuscation(
         s1=s1,
@@ -111,14 +119,15 @@ def generate_awg_obfuscation() -> AwgObfuscation:
         h2=h2,
         h3=h3,
         h4=h4,
-        jc=random.randint(1, 128),
+        jc=random.randint(4, 10),
         jmin=jmin,
         jmax=jmax,
-        i1=random.randint(0, 1280),
-        i2=random.randint(0, 1280),
-        i3=random.randint(0, 1280),
-        i4=random.randint(0, 1280),
-        i5=random.randint(0, 1280),
+        # WebRTC/STUN Binding Request — mimics video call signaling
+        i1="<b 0x000100002112a442><r 12>",
+        # STUN-like follow-up with timestamp for multi-packet realism
+        i2="<b 0x0101><r 4><t><r 8>",
+        # Pure random entropy packet
+        i3="<r 32>",
     )
 
 

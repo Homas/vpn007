@@ -288,34 +288,41 @@ class TestComposeAwgObfuscation:
             domain="vpn.example.com",
             awg_listen_port=34567,
             awg_obfuscation=AwgObfuscation(
-                s1=30, s2=80, s3=40, s4=100,
+                s1=30, s2=80, s3=40, s4=20,
                 h1=100, h2=200, h3=300, h4=400,
                 jc=4, jmin=50, jmax=1000,
-                i1=10, i2=20, i3=30, i4=40, i5=50,
             ),
         )
         parsed = yaml.safe_load(generate_compose(config))
         awg_env = parsed["services"]["amneziawg"]["environment"]
         assert "AWG_S1=30" in awg_env
-        assert "AWG_S4=100" in awg_env
+        assert "AWG_S4=20" in awg_env
         assert "AWG_H1=100" in awg_env
         assert "AWG_JC=4" in awg_env
-        assert "AWG_I5=50" in awg_env
+        # I1-I5 should NOT be present when empty
+        awg_env_str = " ".join(str(e) for e in awg_env)
+        assert "AWG_I1" not in awg_env_str
 
     def test_awg_obfuscation_auto_generated_when_none(self) -> None:
         """When no obfuscation params are provided, they are auto-generated."""
         config = DeployConfig(domain="vpn.example.com", awg_listen_port=34567)
         parsed = yaml.safe_load(generate_compose(config))
         awg_env = parsed["services"]["amneziawg"]["environment"]
-        # All 2.0 params must be present even when not explicitly provided
+        # Core 2.0 params must be present even when not explicitly provided
         awg_env_str = " ".join(str(e) for e in awg_env)
         for param in ("AWG_S1", "AWG_S2", "AWG_S3", "AWG_S4",
                        "AWG_H1", "AWG_H2", "AWG_H3", "AWG_H4",
-                       "AWG_JC", "AWG_JMIN", "AWG_JMAX",
-                       "AWG_I1", "AWG_I2", "AWG_I3", "AWG_I4", "AWG_I5"):
+                       "AWG_JC", "AWG_JMIN", "AWG_JMAX"):
             assert param in awg_env_str, (
                 f"{param} must be present in auto-generated AWG environment"
             )
+        # I1-I3 should be present with WebRTC/STUN defaults
+        assert "AWG_I1=" in awg_env_str, "AWG_I1 must be present (WebRTC default)"
+        assert "AWG_I2=" in awg_env_str, "AWG_I2 must be present (WebRTC default)"
+        assert "AWG_I3=" in awg_env_str, "AWG_I3 must be present (entropy default)"
+        # I4-I5 should NOT be present (empty)
+        assert "AWG_I4" not in awg_env_str
+        assert "AWG_I5" not in awg_env_str
 
 
 class TestComposeAmneziawgConfig:
@@ -457,17 +464,19 @@ class TestComposeAwgImage:
             domain="vpn.example.com",
             awg_listen_port=34567,
             awg_obfuscation=AwgObfuscation(
-                s1=30, s2=80, s3=40, s4=100,
+                s1=30, s2=80, s3=40, s4=20,
                 h1=100, h2=200, h3=300, h4=400,
                 jc=4, jmin=50, jmax=1000,
-                i1=10, i2=20, i3=30, i4=40, i5=50,
+                i1="", i2="", i3="", i4="", i5="",
             ),
         )
         parsed = yaml.safe_load(generate_compose(config))
         awg_env = parsed["services"]["amneziawg"]["environment"]
         assert "AWG_S3=40" in awg_env
-        assert "AWG_S4=100" in awg_env
-        assert "AWG_I5=50" in awg_env
+        assert "AWG_S4=20" in awg_env
+        # I1-I5 should not be present when empty
+        awg_env_str = " ".join(str(e) for e in awg_env)
+        assert "AWG_I5" not in awg_env_str
 
     def test_amneziawg_retains_capabilities(self) -> None:
         """amneziawg must have NET_ADMIN, SYS_MODULE, host network."""
@@ -486,23 +495,37 @@ class TestComposeAwgImage:
 # Property 6: AmneziaWG obfuscation parameters preserved
 # ---------------------------------------------------------------------------
 
-# All 16 AmneziaWG 2.0 obfuscation parameter environment variable names.
-AWG_PARAM_NAMES = (
+# Core AmneziaWG 2.0 obfuscation parameter environment variable names.
+# I1-I5 are optional CPS strings, not included in core params.
+AWG_CORE_PARAM_NAMES = (
     "AWG_S1", "AWG_S2", "AWG_S3", "AWG_S4",
     "AWG_H1", "AWG_H2", "AWG_H3", "AWG_H4",
-    "AWG_I1", "AWG_I2", "AWG_I3", "AWG_I4", "AWG_I5",
     "AWG_JC", "AWG_JMIN", "AWG_JMAX",
 )
 
 
-def _parse_awg_env(awg_env: list[str]) -> dict[str, int]:
+def _parse_awg_env(awg_env: list[str]) -> dict[str, str]:
     """Parse AmneziaWG environment entries into a name→value mapping."""
+    result: dict[str, str] = {}
+    for entry in awg_env:
+        entry_str = str(entry)
+        if entry_str.startswith("AWG_"):
+            key, _, val = entry_str.partition("=")
+            result[key] = val
+    return result
+
+
+def _parse_awg_env_int(awg_env: list[str]) -> dict[str, int]:
+    """Parse AmneziaWG environment entries into a name→int mapping (core params only)."""
     result: dict[str, int] = {}
     for entry in awg_env:
         entry_str = str(entry)
         if entry_str.startswith("AWG_"):
             key, _, val = entry_str.partition("=")
-            result[key] = int(val)
+            try:
+                result[key] = int(val)
+            except ValueError:
+                pass  # Skip non-integer values (I1-I5 CPS strings)
     return result
 
 
@@ -510,9 +533,10 @@ class TestProperty6AwgObfuscationPreserved:
     """**Property 6: AmneziaWG obfuscation parameters preserved**
 
     For any valid AwgObfuscation, the generated container environment
-    contains all 16 AmneziaWG 2.0 obfuscation parameters with the
-    specified values. When no obfuscation params are provided, the
-    auto-generated values are within valid 2.0 ranges.
+    contains all core AmneziaWG 2.0 obfuscation parameters (S1-S4, H1-H4,
+    Jc, Jmin, Jmax) with the specified values. I1-I5 are optional CPS
+    format strings included only when non-empty. When no obfuscation params
+    are provided, auto-generated values are within valid 2.0 ranges.
 
     **Validates: Requirements 4.1, 4.5, 4.6**
     """
@@ -521,7 +545,7 @@ class TestProperty6AwgObfuscationPreserved:
     def test_explicit_obfuscation_params_preserved(
         self, awg_obfuscation: AwgObfuscation
     ) -> None:
-        """All 16 explicit AWG params appear in compose env with correct values."""
+        """All core AWG params appear in compose env with correct values."""
         config = DeployConfig(
             domain="vpn.example.com",
             awg_listen_port=34567,
@@ -529,10 +553,10 @@ class TestProperty6AwgObfuscationPreserved:
         )
         parsed = yaml.safe_load(generate_compose(config))
         awg_env = parsed["services"]["amneziawg"]["environment"]
-        env_map = _parse_awg_env(awg_env)
+        env_map = _parse_awg_env_int(awg_env)
 
-        # All 16 params must be present
-        for param in AWG_PARAM_NAMES:
+        # Core params must be present
+        for param in AWG_CORE_PARAM_NAMES:
             assert param in env_map, (
                 f"{param} missing from AmneziaWG environment"
             )
@@ -546,11 +570,6 @@ class TestProperty6AwgObfuscationPreserved:
         assert env_map["AWG_H2"] == awg_obfuscation.h2
         assert env_map["AWG_H3"] == awg_obfuscation.h3
         assert env_map["AWG_H4"] == awg_obfuscation.h4
-        assert env_map["AWG_I1"] == awg_obfuscation.i1
-        assert env_map["AWG_I2"] == awg_obfuscation.i2
-        assert env_map["AWG_I3"] == awg_obfuscation.i3
-        assert env_map["AWG_I4"] == awg_obfuscation.i4
-        assert env_map["AWG_I5"] == awg_obfuscation.i5
         assert env_map["AWG_JC"] == awg_obfuscation.jc
         assert env_map["AWG_JMIN"] == awg_obfuscation.jmin
         assert env_map["AWG_JMAX"] == awg_obfuscation.jmax
@@ -560,26 +579,30 @@ class TestProperty6AwgObfuscationPreserved:
         self, config: DeployConfig
     ) -> None:
         """When awg_obfuscation is None, auto-generated values are within valid 2.0 ranges."""
-        # Force awg_obfuscation to None so auto-generation kicks in
         from dataclasses import replace
 
         config = replace(config, awg_obfuscation=None, awg_listen_port=34567)
 
         parsed = yaml.safe_load(generate_compose(config))
         awg_env = parsed["services"]["amneziawg"]["environment"]
-        env_map = _parse_awg_env(awg_env)
+        env_map = _parse_awg_env_int(awg_env)
 
-        # All 16 params must be present
-        for param in AWG_PARAM_NAMES:
+        # Core params must be present
+        for param in AWG_CORE_PARAM_NAMES:
             assert param in env_map, (
                 f"{param} missing from auto-generated AmneziaWG environment"
             )
 
-        # S1-S4: 15-150
-        for s_param in ("AWG_S1", "AWG_S2", "AWG_S3", "AWG_S4"):
+        # S1-S3: 15-150 (recommended auto-gen range)
+        for s_param in ("AWG_S1", "AWG_S2", "AWG_S3"):
             assert 15 <= env_map[s_param] <= 150, (
                 f"{s_param}={env_map[s_param]} out of range [15, 150]"
             )
+
+        # S4: 0-32 (Data packet prefix, limited room)
+        assert 0 <= env_map["AWG_S4"] <= 32, (
+            f"AWG_S4={env_map['AWG_S4']} out of range [0, 32]"
+        )
 
         # Bidirectional S constraints: S1+56≠S2 and S2+56≠S1
         assert env_map["AWG_S1"] + 56 != env_map["AWG_S2"], (
@@ -587,13 +610,6 @@ class TestProperty6AwgObfuscationPreserved:
         )
         assert env_map["AWG_S2"] + 56 != env_map["AWG_S1"], (
             f"S2+56 must not equal S1: {env_map['AWG_S2']}+56 == {env_map['AWG_S1']}"
-        )
-        # S3+56≠S4 and S4+56≠S3
-        assert env_map["AWG_S3"] + 56 != env_map["AWG_S4"], (
-            f"S3+56 must not equal S4: {env_map['AWG_S3']}+56 == {env_map['AWG_S4']}"
-        )
-        assert env_map["AWG_S4"] + 56 != env_map["AWG_S3"], (
-            f"S4+56 must not equal S3: {env_map['AWG_S4']}+56 == {env_map['AWG_S3']}"
         )
 
         # H1-H4: 5-2147483647, all distinct
@@ -606,26 +622,14 @@ class TestProperty6AwgObfuscationPreserved:
             f"H1-H4 must be distinct, got {[env_map[f'AWG_H{i}'] for i in range(1, 5)]}"
         )
 
-        # I1-I5: 0-1280
-        for i_param in ("AWG_I1", "AWG_I2", "AWG_I3", "AWG_I4", "AWG_I5"):
-            assert 0 <= env_map[i_param] <= 1280, (
-                f"{i_param}={env_map[i_param]} out of range [0, 1280]"
-            )
-
-        # Jc: 1-128
-        assert 1 <= env_map["AWG_JC"] <= 128, (
-            f"AWG_JC={env_map['AWG_JC']} out of range [1, 128]"
+        # Jc: 4-10 (recommended auto-gen range)
+        assert 4 <= env_map["AWG_JC"] <= 10, (
+            f"AWG_JC={env_map['AWG_JC']} out of recommended range [4, 10]"
         )
 
-        # Jmin <= Jmax, both in [1, 1280]
-        assert 1 <= env_map["AWG_JMIN"] <= 1280, (
-            f"AWG_JMIN={env_map['AWG_JMIN']} out of range [1, 1280]"
-        )
-        assert 1 <= env_map["AWG_JMAX"] <= 1280, (
-            f"AWG_JMAX={env_map['AWG_JMAX']} out of range [1, 1280]"
-        )
-        assert env_map["AWG_JMIN"] <= env_map["AWG_JMAX"], (
-            f"AWG_JMIN ({env_map['AWG_JMIN']}) must be <= AWG_JMAX ({env_map['AWG_JMAX']})"
+        # Jmin < Jmax, both 0-1280
+        assert env_map["AWG_JMIN"] < env_map["AWG_JMAX"], (
+            f"Jmin must be < Jmax: {env_map['AWG_JMIN']} >= {env_map['AWG_JMAX']}"
         )
 
 

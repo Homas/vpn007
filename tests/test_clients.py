@@ -203,10 +203,10 @@ class TestProvisionAwgPeer:
     def test_conf_with_obfuscation(self) -> None:
         """With AWG obfuscation, conf includes all 2.0 params."""
         obfs = AwgObfuscation(
-            s1=30, s2=80, s3=40, s4=100,
+            s1=30, s2=80, s3=40, s4=20,
             h1=100, h2=200, h3=300, h4=400,
             jc=4, jmin=50, jmax=1000,
-            i1=10, i2=20, i3=30, i4=40, i5=50,
+            i1="", i2="", i3="", i4="", i5="",
         )
         config = DeployConfig(domain="vpn.example.com", awg_obfuscation=obfs)
         result = provision_awg_peer(config)
@@ -214,7 +214,7 @@ class TestProvisionAwgPeer:
         assert "S1 = 30" in conf
         assert "S2 = 80" in conf
         assert "S3 = 40" in conf
-        assert "S4 = 100" in conf
+        assert "S4 = 20" in conf
         assert "H1 = 100" in conf
         assert "H2 = 200" in conf
         assert "H3 = 300" in conf
@@ -222,11 +222,6 @@ class TestProvisionAwgPeer:
         assert "Jc = 4" in conf
         assert "Jmin = 50" in conf
         assert "Jmax = 1000" in conf
-        assert "I1 = 10" in conf
-        assert "I2 = 20" in conf
-        assert "I3 = 30" in conf
-        assert "I4 = 40" in conf
-        assert "I5 = 50" in conf
 
     def test_default_port_fallback(self) -> None:
         """When awg_listen_port is None, falls back to 51820."""

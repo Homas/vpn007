@@ -138,28 +138,30 @@ class TestParseTunnelType:
 class TestParseAwgObfuscation:
     def test_full_config(self) -> None:
         env = {
-            "AWG_S1": "30", "AWG_S2": "80", "AWG_S3": "40", "AWG_S4": "100",
+            "AWG_S1": "30", "AWG_S2": "80", "AWG_S3": "40", "AWG_S4": "20",
             "AWG_H1": "100", "AWG_H2": "200", "AWG_H3": "300", "AWG_H4": "400",
             "AWG_JC": "4", "AWG_JMIN": "50", "AWG_JMAX": "1000",
-            "AWG_I1": "10", "AWG_I2": "20", "AWG_I3": "30", "AWG_I4": "40", "AWG_I5": "50",
+            "AWG_I1": "<b 0xd100000001><r 50>", "AWG_I2": "", "AWG_I3": "", "AWG_I4": "", "AWG_I5": "",
         }
         result = _parse_awg_obfuscation(env)
         assert result is not None
         assert result.s1 == 30
+        assert result.s4 == 20
         assert result.h4 == 400
         assert result.jmax == 1000
-        assert result.i5 == 50
+        assert result.i1 == "<b 0xd100000001><r 50>"
+        assert result.i5 == ""
 
     def test_minimal_config_uses_defaults(self) -> None:
         env = {
-            "AWG_S1": "30", "AWG_S2": "80", "AWG_S3": "40", "AWG_S4": "100",
+            "AWG_S1": "30", "AWG_S2": "80", "AWG_S3": "40", "AWG_S4": "20",
             "AWG_H1": "100", "AWG_H2": "200", "AWG_H3": "300", "AWG_H4": "400",
         }
         result = _parse_awg_obfuscation(env)
         assert result is not None
         assert result.jc == 4  # default
         assert result.jmin == 50  # default
-        assert result.i1 == 0  # default
+        assert result.i1 == ""  # default (empty CPS string)
 
     def test_no_vars_returns_none(self) -> None:
         assert _parse_awg_obfuscation({}) is None
