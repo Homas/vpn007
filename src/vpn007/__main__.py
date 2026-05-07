@@ -813,11 +813,13 @@ def _patch_awg_i_params(config: DeployConfig, compose_path: Path) -> None:
     patches the generated config to add the I params after the last H param.
 
     If I params are already present in the config, this is a no-op.
-    If no AWG obfuscation is configured, this is a no-op.
     """
+    from vpn007.crypto import generate_awg_obfuscation
+
+    # Resolve I params: use explicit config, or fall back to defaults
     awg = config.awg_obfuscation
     if awg is None:
-        return
+        awg = generate_awg_obfuscation()
 
     # Collect non-empty I params
     i_params: list[tuple[str, str]] = []
@@ -827,14 +829,18 @@ def _patch_awg_i_params(config: DeployConfig, compose_path: Path) -> None:
             i_params.append((name, value))
 
     if not i_params:
+        logger.info("No AWG I params to inject (all empty).")
         return
 
     wg_conf_path = config.output_dir / "data" / "amneziawg" / "wg0.conf"
 
     # Wait for wg-easy to generate the config (it does this at first startup)
     import time
-    for _ in range(15):
+    logger.info("Waiting for wg-easy to generate wg0.conf...")
+    for attempt in range(15):
         if wg_conf_path.exists() and wg_conf_path.stat().st_size > 100:
+            logger.debug("wg0.conf found (attempt %d, size %d bytes)",
+                         attempt + 1, wg_conf_path.stat().st_size)
             break
         time.sleep(2)
     else:
@@ -867,8 +873,9 @@ def _patch_awg_i_params(config: DeployConfig, compose_path: Path) -> None:
                 insert_idx = idx + 1
         if insert_idx is None:
             logger.warning(
-                "Could not find insertion point in wg0.conf — "
-                "skipping I-param injection."
+                "Could not find insertion point in wg0.conf (no H4 or S2 line) — "
+                "skipping I-param injection. Config content:\n%s",
+                content[:500],
             )
             return
 
