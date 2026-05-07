@@ -52,6 +52,7 @@ server {
     ssl_prefer_server_ciphers on;
 
     # 3x-ui panel (IP-restricted + rate-limited)
+    # 3x-ui panel (IP-restricted + rate-limited)
     location {{ xui_path_prefix }}/ {
         include /etc/nginx/conf.d/approved_panel_ips.conf;
         deny all;
@@ -63,10 +64,20 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Rewrite redirects from backend to include the path prefix
+        proxy_redirect / {{ xui_path_prefix }}/;
+
+        # Rewrite absolute paths in HTML/JS/CSS responses
+        sub_filter_once off;
+        sub_filter_types text/html text/css application/javascript;
+        sub_filter 'href="/' 'href="{{ xui_path_prefix }}/';
+        sub_filter 'src="/' 'src="{{ xui_path_prefix }}/';
+        sub_filter 'url(/' 'url({{ xui_path_prefix }}/';
+        sub_filter '"/assets/' '"{{ xui_path_prefix }}/assets/';
     }
 
     # AmneziaWG panel (IP-restricted + rate-limited)
-    # AmneziaWG runs on host network, reached via host.docker.internal
     location {{ awg_panel_path_prefix }}/ {
         include /etc/nginx/conf.d/approved_panel_ips.conf;
         deny all;
@@ -78,6 +89,16 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Rewrite redirects from backend to include the path prefix
+        proxy_redirect / {{ awg_panel_path_prefix }}/;
+
+        # Rewrite absolute paths in HTML/JS/CSS responses
+        sub_filter_once off;
+        sub_filter_types text/html text/css application/javascript;
+        sub_filter 'href="/' 'href="{{ awg_panel_path_prefix }}/';
+        sub_filter 'src="/' 'src="{{ awg_panel_path_prefix }}/';
+        sub_filter 'action="/' 'action="{{ awg_panel_path_prefix }}/';
     }
 
     # Default: cover site
