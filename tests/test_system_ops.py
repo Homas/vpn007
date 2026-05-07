@@ -195,40 +195,40 @@ class TestProvisionAwgKernelModule:
         mock_loaded.assert_called_once_with("amneziawg")
 
     @patch("vpn007.system_ops._persist_module_load")
-    @patch("vpn007.system_ops._compile_and_load_awg_module", return_value=True)
-    @patch("vpn007.system_ops._install_kernel_headers", return_value=True)
-    @patch("vpn007.system_ops._is_module_loaded", return_value=False)
+    @patch("vpn007.system_ops._is_module_loaded", side_effect=[False, True])
+    @patch("vpn007.system_ops._install_awg_package", return_value=True)
+    @patch("vpn007.system_ops._install_awg_prerequisites", return_value=True)
     def test_full_provisioning_success(
         self,
+        mock_prereqs: MagicMock,
+        mock_package: MagicMock,
         mock_loaded: MagicMock,
-        mock_headers: MagicMock,
-        mock_compile: MagicMock,
         mock_persist: MagicMock,
     ) -> None:
-        result = provision_awg_kernel_module("debian")
+        result = provision_awg_kernel_module("ubuntu")
         assert result is True
-        mock_headers.assert_called_once()
-        mock_compile.assert_called_once()
+        mock_prereqs.assert_called_once_with("ubuntu")
+        mock_package.assert_called_once_with("ubuntu")
         mock_persist.assert_called_once_with("amneziawg")
 
-    @patch("vpn007.system_ops._install_kernel_headers", return_value=False)
+    @patch("vpn007.system_ops._install_awg_prerequisites", return_value=False)
     @patch("vpn007.system_ops._is_module_loaded", return_value=False)
-    def test_header_install_failure_returns_false(
-        self, mock_loaded: MagicMock, mock_headers: MagicMock
+    def test_prerequisite_failure_returns_false(
+        self, mock_loaded: MagicMock, mock_prereqs: MagicMock
     ) -> None:
         result = provision_awg_kernel_module("ubuntu")
         assert result is False
 
-    @patch("vpn007.system_ops._compile_and_load_awg_module", return_value=False)
-    @patch("vpn007.system_ops._install_kernel_headers", return_value=True)
+    @patch("vpn007.system_ops._install_awg_package", return_value=False)
+    @patch("vpn007.system_ops._install_awg_prerequisites", return_value=True)
     @patch("vpn007.system_ops._is_module_loaded", return_value=False)
-    def test_compile_failure_returns_false(
+    def test_package_install_failure_returns_false(
         self,
         mock_loaded: MagicMock,
-        mock_headers: MagicMock,
-        mock_compile: MagicMock,
+        mock_prereqs: MagicMock,
+        mock_package: MagicMock,
     ) -> None:
-        result = provision_awg_kernel_module("debian")
+        result = provision_awg_kernel_module("ubuntu")
         assert result is False
 
 

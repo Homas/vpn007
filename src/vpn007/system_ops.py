@@ -208,14 +208,16 @@ def install_systemd_timers(systemd_dir: Path) -> None:
 def provision_awg_kernel_module(distro: str) -> bool:
     """Provision the AmneziaWG kernel module on the host.
 
-    On Debian/Ubuntu:
-      (a) Check if ``amneziawg`` module is already loaded via ``lsmod``.
-      (b) Install kernel headers for the running kernel.
-      (c) Compile and load the module via DKMS.
-      (d) Add the module to ``/etc/modules-load.d/`` for persistence.
+    Uses the official AmneziaWG PPA/repository for installation:
+    - Ubuntu: ``ppa:amnezia/ppa`` → ``apt install amneziawg``
+    - Debian: Launchpad PPA with manual key import → ``apt install amneziawg``
+
+    The ``amneziawg`` package handles DKMS compilation automatically.
 
     On Alpine: skip kernel module entirely and use amneziawg-go userspace
     fallback (Alpine does not support DKMS).
+
+    Reference: https://github.com/amnezia-vpn/amneziawg-linux-kernel-module
 
     Parameters
     ----------
@@ -251,27 +253,44 @@ def provision_awg_kernel_module(distro: str) -> bool:
         logger.info("AmneziaWG kernel module is already loaded.")
         return True
 
-    # (b) Install kernel headers
-    if not _install_kernel_headers():
+    # (b) Install prerequisites and kernel headers
+    if not _install_awg_prerequisites(distro_lower):
         logger.warning(
-            "Failed to install kernel headers. "
+            "Failed to install AmneziaWG prerequisites. "
             "Falling back to amneziawg-go userspace."
         )
         return False
 
-    # (c) Compile and load via DKMS
-    if not _compile_and_load_awg_module():
+    # (c) Add AmneziaWG repository and install the package
+    if not _install_awg_package(distro_lower):
         logger.warning(
-            "Failed to compile/load AmneziaWG kernel module via DKMS. "
+            "Failed to install AmneziaWG package. "
             "Falling back to amneziawg-go userspace."
         )
         return False
 
-    # (d) Persist module loading across reboots
-    _persist_module_load("amneziawg")
+    # (d) Verify the module is now loaded
+    if _is_module_loaded("amneziawg"):
+        logger.info("AmneziaWG kernel module loaded successfully via package.")
+        _persist_module_load("amneziawg")
+        return True
 
-    logger.info("AmneziaWG kernel module provisioned successfully.")
-    return True
+    # Module not auto-loaded by package — try modprobe
+    logger.info("Attempting to load amneziawg module via modprobe...")
+    try:
+        subprocess.run(
+            ["modprobe", "amneziawg"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+        logger.info("AmneziaWG kernel module loaded successfully.")
+        _persist_module_load("amneziawg")
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        logger.warning("modprobe amneziawg failed: %s", exc)
+        return False
 
 
 def _is_module_loaded(module_name: str) -> bool:
@@ -293,16 +312,20 @@ def _is_module_loaded(module_name: str) -> bool:
         return False
 
 
-def _install_kernel_headers() -> bool:
-    """Install kernel headers for the running kernel.
+def _install_awg_prerequisites(distro: str) -> bool:
+    """Install prerequisites for AmneziaWG: kernel headers and build tools.
 
-    Uses ``linux-headers-$(uname -r)`` on Debian/Ubuntu.
+    Parameters
+    ----------
+    distro:
+        Distribution ID (``"ubuntu"`` or ``"debian"``).
 
     Returns
     -------
     bool
-        ``True`` if installation succeeded.
+        ``True`` if prerequisites were installed successfully.
     """
+    # Determine kernel version for headers package
     try:
         uname_result = subprocess.run(
             ["uname", "-r"],
@@ -316,143 +339,175 @@ def _install_kernel_headers() -> bool:
         logger.warning("Could not determine kernel version: %s", exc)
         return False
 
-    package = f"linux-headers-{kernel_version}"
-    logger.info("Installing kernel headers: %s", package)
+    packages = [
+        "software-properties-common",
+        "gnupg2",
+        f"linux-headers-{kernel_version}",
+    ]
+    # python3-launchpadlib is needed for add-apt-repository on Ubuntu
+    if distro == "ubuntu":
+        packages.append("python3-launchpadlib")
 
+    logger.info("Installing AmneziaWG prerequisites: %s", ", ".join(packages))
     try:
         subprocess.run(
-            ["apt-get", "install", "-y", package],
+            ["apt-get", "install", "-y"] + packages,
             capture_output=True,
             text=True,
             timeout=300,
             check=True,
         )
-        logger.info("Kernel headers installed: %s", package)
+        logger.info("AmneziaWG prerequisites installed.")
         return True
     except subprocess.CalledProcessError as exc:
         logger.warning(
-            "Failed to install %s: %s", package, exc.stderr.strip()
+            "Failed to install prerequisites: %s", exc.stderr.strip()
         )
         return False
     except FileNotFoundError:
-        logger.warning("'apt-get' not found. Cannot install kernel headers.")
+        logger.warning("'apt-get' not found.")
         return False
 
 
-def _clone_awg_kernel_source() -> bool:
-    """Clone the AmneziaWG kernel module source to /usr/src/amneziawg-1.0.
+def _install_awg_package(distro: str) -> bool:
+    """Add the AmneziaWG repository and install the amneziawg package.
 
-    DKMS requires the module source to be present at
-    ``/usr/src/<module>-<version>/`` before it can build and install.
+    For Ubuntu: uses ``add-apt-repository ppa:amnezia/ppa``.
+    For Debian: imports the GPG key and adds the Launchpad PPA manually.
+
+    The ``amneziawg`` package includes DKMS sources that compile the kernel
+    module automatically during installation.
+
+    Parameters
+    ----------
+    distro:
+        Distribution ID (``"ubuntu"`` or ``"debian"``).
 
     Returns
     -------
     bool
-        ``True`` if the source is available (already existed or was cloned).
+        ``True`` if the package was installed successfully.
     """
-    src_dir = Path("/usr/src/amneziawg-1.0")
-    if src_dir.exists() and (src_dir / "dkms.conf").exists():
-        logger.info("AmneziaWG kernel source already present at %s", src_dir)
-        return True
+    if distro == "ubuntu":
+        return _install_awg_via_ppa()
+    else:
+        return _install_awg_via_manual_repo()
 
-    logger.info("Cloning AmneziaWG kernel module source to %s ...", src_dir)
+
+def _install_awg_via_ppa() -> bool:
+    """Install AmneziaWG on Ubuntu via the official PPA."""
+    # Add the PPA (idempotent — no error if already added)
+    logger.info("Adding AmneziaWG PPA: ppa:amnezia/ppa")
     try:
-        # Remove partial clone if it exists without dkms.conf
-        if src_dir.exists():
-            shutil.rmtree(str(src_dir))
-
         subprocess.run(
-            [
-                "git",
-                "clone",
-                "--depth",
-                "1",
-                "--branch",
-                "v1.0",
-                "https://github.com/amnezia-vpn/amneziawg-linux-kernel-module.git",
-                str(src_dir),
-            ],
+            ["add-apt-repository", "-y", "ppa:amnezia/ppa"],
             capture_output=True,
             text=True,
             timeout=120,
             check=True,
         )
-        logger.info("AmneziaWG kernel source cloned successfully.")
-        return True
     except subprocess.CalledProcessError as exc:
-        logger.warning(
-            "Failed to clone AmneziaWG kernel source: %s",
-            exc.stderr.strip(),
-        )
+        logger.warning("Failed to add PPA: %s", exc.stderr.strip())
         return False
     except FileNotFoundError:
-        logger.warning("'git' command not found. Cannot clone AmneziaWG source.")
+        logger.warning("'add-apt-repository' not found.")
         return False
 
-
-def _compile_and_load_awg_module() -> bool:
-    """Compile and load the AmneziaWG kernel module via DKMS.
-
-    Returns
-    -------
-    bool
-        ``True`` if the module was compiled and loaded successfully.
-    """
-    # Ensure DKMS is installed
+    # Update and install
+    logger.info("Installing amneziawg package...")
     try:
         subprocess.run(
-            ["apt-get", "install", "-y", "dkms"],
+            ["apt-get", "update"],
             capture_output=True,
             text=True,
             timeout=120,
             check=True,
         )
-    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-        logger.warning("Failed to install DKMS: %s", exc)
-        return False
-
-    # Clone the kernel module source (DKMS requires /usr/src/amneziawg-1.0)
-    if not _clone_awg_kernel_source():
-        return False
-
-    # Build and install via DKMS
-    logger.info("Building AmneziaWG kernel module via DKMS...")
-    try:
         subprocess.run(
-            ["dkms", "install", "amneziawg/1.0"],
+            ["apt-get", "install", "-y", "amneziawg"],
             capture_output=True,
             text=True,
             timeout=600,
             check=True,
         )
-    except subprocess.CalledProcessError as exc:
-        logger.warning(
-            "DKMS install failed: %s", exc.stderr.strip()
-        )
-        return False
-    except FileNotFoundError:
-        logger.warning("'dkms' command not found after installation attempt.")
-        return False
-
-    # Load the module
-    logger.info("Loading amneziawg kernel module...")
-    try:
-        subprocess.run(
-            ["modprobe", "amneziawg"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=True,
-        )
-        logger.info("AmneziaWG kernel module loaded successfully.")
+        logger.info("AmneziaWG package installed successfully.")
         return True
     except subprocess.CalledProcessError as exc:
         logger.warning(
-            "modprobe amneziawg failed: %s", exc.stderr.strip()
+            "Failed to install amneziawg: %s", exc.stderr.strip()
         )
         return False
-    except FileNotFoundError:
-        logger.warning("'modprobe' command not found.")
+
+
+def _install_awg_via_manual_repo() -> bool:
+    """Install AmneziaWG on Debian via manual Launchpad repository setup."""
+    # Import GPG key
+    logger.info("Importing AmneziaWG GPG key...")
+    try:
+        subprocess.run(
+            [
+                "apt-key",
+                "adv",
+                "--keyserver",
+                "keyserver.ubuntu.com",
+                "--recv-keys",
+                "57290828",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        logger.warning("Failed to import GPG key: %s", exc.stderr.strip())
+        return False
+
+    # Add repository (idempotent — check if already present)
+    sources_list = Path("/etc/apt/sources.list")
+    ppa_line = "deb https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu focal main"
+    ppa_src_line = (
+        "deb-src https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu focal main"
+    )
+
+    try:
+        existing = sources_list.read_text()
+        lines_to_add = []
+        if ppa_line not in existing:
+            lines_to_add.append(ppa_line)
+        if ppa_src_line not in existing:
+            lines_to_add.append(ppa_src_line)
+        if lines_to_add:
+            with sources_list.open("a") as f:
+                for line in lines_to_add:
+                    f.write(f"\n{line}")
+            logger.info("Added AmneziaWG repository to sources.list.")
+    except OSError as exc:
+        logger.warning("Failed to update sources.list: %s", exc)
+        return False
+
+    # Update and install
+    logger.info("Installing amneziawg package...")
+    try:
+        subprocess.run(
+            ["apt-get", "update"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=True,
+        )
+        subprocess.run(
+            ["apt-get", "install", "-y", "amneziawg"],
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=True,
+        )
+        logger.info("AmneziaWG package installed successfully.")
+        return True
+    except subprocess.CalledProcessError as exc:
+        logger.warning(
+            "Failed to install amneziawg: %s", exc.stderr.strip()
+        )
         return False
 
 

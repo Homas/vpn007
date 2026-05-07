@@ -131,7 +131,6 @@ class TestProperty3ComposeServiceCompleteness:
         """Bridge-network services must have static IPs on vpn_net."""
         parsed = yaml.safe_load(generate_compose(config))
         expected_ips = {
-            "reverse_proxy": "172.20.0.2",
             "three_x_ui": "172.20.0.3",
             "cover_site": "172.20.0.4",
         }
@@ -143,6 +142,11 @@ class TestProperty3ComposeServiceCompleteness:
             assert actual_ip == expected_ip, (
                 f"{svc_name}: expected IP {expected_ip}, got {actual_ip}"
             )
+        # reverse_proxy uses host network (no bridge IP)
+        rp = parsed["services"]["reverse_proxy"]
+        assert rp.get("network_mode") == "host", (
+            "reverse_proxy must use host network for real client IP visibility"
+        )
 
     @given(config=valid_deploy_config)
     def test_vpn_net_bridge_network_defined(self, config: DeployConfig) -> None:
@@ -161,14 +165,13 @@ class TestProperty3ComposeServiceCompleteness:
         )
 
     @given(config=valid_deploy_config)
-    def test_reverse_proxy_has_extra_hosts(self, config: DeployConfig) -> None:
-        """reverse_proxy must have host.docker.internal:host-gateway."""
+    def test_reverse_proxy_on_host_network(self, config: DeployConfig) -> None:
+        """reverse_proxy must use host network (no extra_hosts needed)."""
         parsed = yaml.safe_load(generate_compose(config))
         rp = parsed["services"]["reverse_proxy"]
-        extra_hosts = rp.get("extra_hosts", [])
-        assert any("host.docker.internal" in h for h in extra_hosts), (
-            "reverse_proxy must have host.docker.internal extra_host"
-        )
+        assert rp.get("network_mode") == "host"
+        # No extra_hosts needed on host network
+        assert "extra_hosts" not in rp
 
     @given(config=valid_deploy_config)
     def test_shared_letsencrypt_volume(self, config: DeployConfig) -> None:
@@ -223,39 +226,28 @@ class TestProperty3ComposeServiceCompleteness:
 
 
 class TestComposePort8443:
-    """Verify port 8443 is conditionally included."""
+    """Verify port 8443 handling — with host network, ports are managed by nginx config, not Docker."""
 
-    def test_port_8443_included_when_enabled(self) -> None:
+    def test_reverse_proxy_uses_host_network(self) -> None:
         config = DeployConfig(domain="vpn.example.com", awg_listen_port=34567, enable_port_8443=True)
         parsed = yaml.safe_load(generate_compose(config))
-        ports = parsed["services"]["reverse_proxy"]["ports"]
-        port_strs = [str(p) for p in ports]
-        assert any("8443" in p for p in port_strs), "Port 8443 must be present when enabled"
-
-    def test_port_8443_excluded_when_disabled(self) -> None:
-        config = DeployConfig(domain="vpn.example.com", awg_listen_port=34567, enable_port_8443=False)
-        parsed = yaml.safe_load(generate_compose(config))
-        ports = parsed["services"]["reverse_proxy"]["ports"]
-        port_strs = [str(p) for p in ports]
-        assert not any("8443" in p for p in port_strs), "Port 8443 must not be present when disabled"
+        rp = parsed["services"]["reverse_proxy"]
+        assert rp.get("network_mode") == "host"
+        # No ports mapping with host network
+        assert "ports" not in rp
 
 
 class TestComposeIncomingIP:
-    """Verify incoming IP binding on ports."""
+    """Verify incoming IP handling — with host network, binding is in nginx config."""
 
-    def test_incoming_ip_binds_https_port(self) -> None:
+    def test_reverse_proxy_host_network_no_ports(self) -> None:
         config = DeployConfig(
             domain="vpn.example.com", awg_listen_port=34567, incoming_ip="203.0.113.10"
         )
         parsed = yaml.safe_load(generate_compose(config))
-        ports = parsed["services"]["reverse_proxy"]["ports"]
-        assert f"203.0.113.10:{config.https_port}:{config.https_port}" in ports
-
-    def test_no_incoming_ip_binds_all(self) -> None:
-        config = DeployConfig(domain="vpn.example.com", awg_listen_port=34567)
-        parsed = yaml.safe_load(generate_compose(config))
-        ports = parsed["services"]["reverse_proxy"]["ports"]
-        assert f"{config.https_port}:{config.https_port}" in ports
+        rp = parsed["services"]["reverse_proxy"]
+        assert rp.get("network_mode") == "host"
+        assert "ports" not in rp
 
 
 class TestComposeTailscaleAuthKey:

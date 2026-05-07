@@ -20,19 +20,25 @@ stream {
         server 127.0.0.1:10080;
     }
 
-    # Main listener on port 443 — SNI-based routing with PROXY protocol
+    # Main listener — SNI-based routing with PROXY protocol
     # PROXY protocol is enabled globally because Nginx stream cannot set
     # proxy_protocol per-upstream in map mode. Both Xray and the HTTP
     # backend are configured to accept PROXY protocol headers.
     #
-    # NOTE: incoming_ip binding is handled by Docker port mapping in
-    # docker-compose.yml. Inside the container, nginx listens on all
-    # interfaces (0.0.0.0 / [::]).
+    # With network_mode: host, nginx can bind to the incoming_ip directly.
     server {
+{% if incoming_ip %}
+        listen {{ incoming_ip }}:{{ https_port }};
+{% else %}
         listen {{ https_port }};
+{% endif %}
         listen [::]:{{ https_port }};
 {% if enable_port_8443 %}
+{% if incoming_ip %}
+        listen {{ incoming_ip }}:8443;
+{% else %}
         listen 8443;
+{% endif %}
         listen [::]:8443;
 {% endif %}
 

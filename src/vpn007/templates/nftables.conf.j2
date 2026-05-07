@@ -115,8 +115,11 @@ table ip nat {
     chain postrouting {
         type nat hook postrouting priority 100;
 
-        # Multi-IP: SNAT outbound traffic to use designated egress IP
-        oifname != "lo" snat to {{ outgoing_ip }}
+        # Multi-IP: SNAT VPN client traffic to use designated egress IP.
+        # Only applies to traffic from Docker bridge and AmneziaWG subnets,
+        # NOT to the server's own outbound connections (which use the default route).
+        ip saddr 172.20.0.0/16 oifname != "lo" snat to {{ outgoing_ip }}
+        ip saddr 10.8.0.0/24 oifname != "lo" snat to {{ outgoing_ip }}
     }
 }
 {% endif %}

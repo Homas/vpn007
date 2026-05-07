@@ -136,9 +136,10 @@ def generate_nginx_http_config(config: DeployConfig) -> str:
 
 def _build_stream_context(config: DeployConfig) -> dict:
     """Build the Jinja2 template context for the stream config."""
+    # Nginx runs on host network, reaches three_x_ui via its bridge IP
     return {
         "reality_sni": config.reality_sni,
-        "xray_upstream": f"three_x_ui:{config.xray_internal_port}",
+        "xray_upstream": f"172.20.0.3:{config.xray_internal_port}",
         "incoming_ip": config.incoming_ip,
         "enable_port_8443": config.enable_port_8443,
         "https_port": config.https_port,
@@ -149,12 +150,13 @@ def _build_http_context(config: DeployConfig) -> dict:
     """Build the Jinja2 template context for the HTTP config."""
     cover_site_domain = _extract_cover_site_domain(config.cover_site_url)
 
+    # Nginx runs on host network, reaches containers via their bridge IPs
     return {
         "domain": config.domain,
         "xui_path_prefix": config.xui_path_prefix,
         "awg_panel_path_prefix": config.awg_panel_path_prefix,
         "awg_panel_port": config.awg_panel_port,
-        "three_x_ui_upstream": "three_x_ui:2053",
+        "three_x_ui_upstream": "172.20.0.3:2053",
         "ssl_protocols": _build_ssl_protocols(config.tls_versions),
         "cover_site_mode": config.cover_site_mode.value,
         "cover_site_url": config.cover_site_url,

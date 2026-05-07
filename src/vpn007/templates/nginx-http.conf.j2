@@ -35,8 +35,8 @@ server {
     server_name {{ domain }};
 
     # Extract real client IP from PROXY protocol header sent by stream block
+    # (stream and http blocks are in the same nginx process on the host)
     set_real_ip_from 127.0.0.1;
-    set_real_ip_from 172.20.0.0/16;
     real_ip_header proxy_protocol;
 
     # TLS certificates
@@ -73,7 +73,7 @@ server {
 
         limit_req zone=panel_limit burst=10 nodelay;
 
-        proxy_pass http://host.docker.internal:{{ awg_panel_port }}/;
+        proxy_pass http://127.0.0.1:{{ awg_panel_port }}/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -84,7 +84,7 @@ server {
 {% if cover_site_mode == "proxy" and cover_site_url %}
     # PROXY mode: reverse proxy to external site with aggressive caching
     location / {
-        proxy_pass http://cover_site:80;
+        proxy_pass http://172.20.0.4:80;
         proxy_set_header Host {{ cover_site_domain }};
         proxy_cache cover_cache;
         proxy_cache_valid 200 301 302 1h;
@@ -96,7 +96,7 @@ server {
 {% else %}
     # STATIC mode: serve local static files via cover_site container
     location / {
-        proxy_pass http://cover_site:80;
+        proxy_pass http://172.20.0.4:80;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
