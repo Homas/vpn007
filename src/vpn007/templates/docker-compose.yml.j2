@@ -36,9 +36,9 @@ services:
     restart: unless-stopped
     volumes:
       - ./data/three_x_ui:/etc/x-ui
-      - ./xray/config.json:/etc/x-ui/xray.json:ro
+      - ./xray/config.json:/etc/x-ui/xray.json
     environment:
-      - XUI_LOG_LEVEL=warn
+      - XUI_LOG_LEVEL=info
     networks:
       vpn_net:
         ipv4_address: 172.20.0.3

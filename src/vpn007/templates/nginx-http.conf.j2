@@ -29,7 +29,8 @@ server {
 
 # Port 10080: TLS-terminated traffic from stream module (with PROXY protocol)
 server {
-    listen 10080 ssl http2 proxy_protocol;
+    listen 10080 ssl proxy_protocol;
+    http2 on;
 
     server_name {{ domain }};
 
@@ -49,9 +50,6 @@ server {
     # Strong cipher suites: TLS 1.3 preferred, TLS 1.2 limited to ECDHE+AESGCM and ECDHE+CHACHA20POLY1305
     ssl_ciphers TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
     ssl_prefer_server_ciphers on;
-
-    # ALPN: advertise h2, http/1.1
-    ssl_alpn h2 http/1.1;
 
     # 3x-ui panel (IP-restricted + rate-limited)
     location {{ xui_path_prefix }}/ {

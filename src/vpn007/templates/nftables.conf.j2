@@ -95,7 +95,10 @@ table inet filter {
         # Allow established/related forwarded connections
         ct state established,related accept
 
-        # Docker forwarding rules are added by Docker daemon
+        # Allow Docker bridge containers to reach the internet
+        ip saddr 172.20.0.0/16 accept
+        # Allow return traffic to Docker bridge containers
+        ip daddr 172.20.0.0/16 ct state established,related accept
     }
 
     chain output {

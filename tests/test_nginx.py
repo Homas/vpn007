@@ -109,9 +109,10 @@ class TestProperty8NginxRoutingCompleteness:
     def test_http_listens_on_10080_with_ssl_h2_proxy_protocol(
         self, config: DeployConfig
     ) -> None:
-        """HTTP block must listen on 10080 with ssl, http2, and proxy_protocol."""
+        """HTTP block must listen on 10080 with ssl and proxy_protocol, http2 enabled."""
         output = generate_nginx_http_config(config)
-        assert "listen 10080 ssl http2 proxy_protocol;" in output
+        assert "listen 10080 ssl proxy_protocol;" in output
+        assert "http2 on;" in output
 
     @given(config=valid_deploy_config)
     def test_http_has_real_ip_from_directives(self, config: DeployConfig) -> None:
@@ -153,10 +154,10 @@ class TestProperty8NginxRoutingCompleteness:
             )
 
     @given(config=valid_deploy_config)
-    def test_http_has_alpn(self, config: DeployConfig) -> None:
-        """HTTP block must advertise h2 and http/1.1 via ALPN."""
+    def test_http_has_http2_enabled(self, config: DeployConfig) -> None:
+        """HTTP block must enable HTTP/2 via the http2 directive."""
         output = generate_nginx_http_config(config)
-        assert "ssl_alpn h2 http/1.1;" in output
+        assert "http2 on;" in output
 
     @given(config=valid_deploy_config)
     def test_http_routes_xui_path_to_three_x_ui(self, config: DeployConfig) -> None:
