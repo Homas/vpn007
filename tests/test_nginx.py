@@ -163,7 +163,7 @@ class TestProperty8NginxRoutingCompleteness:
         """HTTP block must route xui_path_prefix to three_x_ui backend."""
         output = generate_nginx_http_config(config)
         assert f"location {config.xui_path_prefix}/" in output
-        assert "proxy_pass http://172.20.0.3:2053/;" in output
+        assert "proxy_pass http://172.20.0.3:2053;" in output
 
     @given(config=valid_deploy_config)
     def test_http_routes_awg_path_to_amneziawg(self, config: DeployConfig) -> None:

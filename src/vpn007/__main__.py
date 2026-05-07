@@ -240,6 +240,9 @@ def main(argv: list[str] | None = None) -> int:
         _print_cleanup_instructions(config)
         return EXIT_DOCKER_ERROR
 
+    # 6d-2. Configure 3x-ui panel base path
+    _configure_three_x_ui(config, compose_path)
+
     # 6e. Apply firewall rules (before certbot — certbot needs to punch a hole)
     logger.info("Applying firewall rules...")
     nftables_path = config.output_dir / "nftables.conf"
@@ -475,6 +478,79 @@ def _run_certbot(config: DeployConfig, compose_path: Path) -> None:
         logger.info("Nginx reloaded with TLS certificate.")
     except subprocess.CalledProcessError as exc:
         logger.warning("Nginx reload failed: %s", exc.stderr.strip())
+
+
+def _configure_three_x_ui(config: DeployConfig, compose_path: Path) -> None:
+    """Configure 3x-ui panel webBasePath to match the nginx path prefix.
+
+    Runs ``x-ui setting -webBasePath`` inside the 3x-ui container so the
+    panel serves its assets and routes under the configured prefix path.
+    This is required because 3x-ui generates absolute URLs for its assets.
+
+    This is idempotent — setting the same path again is a no-op.
+    """
+    web_base_path = f"{config.xui_path_prefix}/"
+    logger.info("Configuring 3x-ui webBasePath: %s", web_base_path)
+
+    # Set the webBasePath via the x-ui CLI
+    setting_cmd = [
+        "docker",
+        "compose",
+        "-f",
+        str(compose_path),
+        "--project-name",
+        "vpn007",
+        "exec",
+        "-T",
+        "three_x_ui",
+        "/app/x-ui",
+        "setting",
+        "-webBasePath",
+        web_base_path,
+    ]
+
+    try:
+        result = subprocess.run(
+            setting_cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "Failed to set 3x-ui webBasePath (exit %d): %s",
+                result.returncode,
+                result.stderr.strip(),
+            )
+            return
+        logger.debug("x-ui setting output: %s", result.stdout.strip())
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+        logger.warning("Could not configure 3x-ui webBasePath: %s", exc)
+        return
+
+    # Restart 3x-ui to apply the new setting
+    restart_cmd = [
+        "docker",
+        "compose",
+        "-f",
+        str(compose_path),
+        "--project-name",
+        "vpn007",
+        "restart",
+        "three_x_ui",
+    ]
+
+    try:
+        subprocess.run(
+            restart_cmd,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        )
+        logger.info("3x-ui restarted with webBasePath: %s", web_base_path)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        logger.warning("Failed to restart 3x-ui: %s", exc)
 
 
 def _copy_letsencrypt_cert_to_nginx(config: DeployConfig) -> None:

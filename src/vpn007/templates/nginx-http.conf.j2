@@ -53,45 +53,46 @@ server {
 
     # 3x-ui panel (IP-restricted + rate-limited)
     # 3x-ui panel (IP-restricted + rate-limited)
+    # NOTE: 3x-ui must be configured with webBasePath = "{{ xui_path_prefix }}/"
+    # in its panel settings (Panel Settings → URL Root Path).
     location {{ xui_path_prefix }}/ {
         include /etc/nginx/conf.d/approved_panel_ips.conf;
         deny all;
 
         limit_req zone=panel_limit burst=10 nodelay;
 
-        proxy_pass http://{{ three_x_ui_upstream }}/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-
-        # Rewrite backend redirects: prepend prefix to Location path
-        proxy_redirect ~^(https?://[^/]+)?/(.*)$ {{ xui_path_prefix }}/$2;
-
-        # Rewrite absolute paths in HTML/JS/CSS responses
-        sub_filter_once off;
-        sub_filter_types text/html text/css application/javascript;
-        sub_filter 'href="/' 'href="{{ xui_path_prefix }}/';
-        sub_filter 'src="/' 'src="{{ xui_path_prefix }}/';
-        sub_filter 'url(/' 'url({{ xui_path_prefix }}/';
-        sub_filter '"/assets/' '"{{ xui_path_prefix }}/assets/';
+        proxy_redirect off;
+        proxy_pass http://{{ three_x_ui_upstream }};
     }
 
     # AmneziaWG panel (IP-restricted + rate-limited)
+    # wg-easy does not support sub-path natively; prefix is stripped and
+    # responses are rewritten to include it.
     location {{ awg_panel_path_prefix }}/ {
         include /etc/nginx/conf.d/approved_panel_ips.conf;
         deny all;
 
         limit_req zone=panel_limit burst=10 nodelay;
 
-        proxy_pass http://127.0.0.1:{{ awg_panel_port }}/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass http://127.0.0.1:{{ awg_panel_port }}/;
 
-        # Rewrite backend redirects: prepend prefix to Location path
-        proxy_redirect ~^(https?://[^/]+)?/(.*)$ {{ awg_panel_path_prefix }}/$2;
+        # Fix redirects: strip backend host/port, prepend prefix
+        proxy_redirect ~^https?://[^/]+(/.*)$ {{ awg_panel_path_prefix }}$1;
+        proxy_redirect / {{ awg_panel_path_prefix }}/;
 
         # Rewrite absolute paths in HTML/JS/CSS responses
         sub_filter_once off;
@@ -99,6 +100,8 @@ server {
         sub_filter 'href="/' 'href="{{ awg_panel_path_prefix }}/';
         sub_filter 'src="/' 'src="{{ awg_panel_path_prefix }}/';
         sub_filter 'action="/' 'action="{{ awg_panel_path_prefix }}/';
+        sub_filter 'fetch("/' 'fetch("{{ awg_panel_path_prefix }}/';
+        sub_filter '"/' '"{{ awg_panel_path_prefix }}/';
     }
 
     # Default: cover site
