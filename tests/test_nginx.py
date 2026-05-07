@@ -71,8 +71,8 @@ class TestProperty8NginxRoutingCompleteness:
         output = generate_nginx_stream_config(config)
         assert config.reality_sni in output
         assert "xray_backend" in output
-        # Xray upstream must point to three_x_ui container via bridge IP
-        assert f"172.20.0.3:{config.xray_internal_port}" in output
+        # Xray upstream must point to three_x_ui container via bridge IP on port 443
+        assert "172.20.0.3:443" in output
 
     @given(config=valid_deploy_config)
     def test_stream_default_routes_to_http(self, config: DeployConfig) -> None:

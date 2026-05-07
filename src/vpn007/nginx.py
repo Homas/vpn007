@@ -136,10 +136,12 @@ def generate_nginx_http_config(config: DeployConfig) -> str:
 
 def _build_stream_context(config: DeployConfig) -> dict:
     """Build the Jinja2 template context for the stream config."""
-    # Nginx runs on host network, reaches three_x_ui via its bridge IP
+    # Nginx runs on host network, reaches three_x_ui via its bridge IP.
+    # Xray listens on port 443 inside the container (clients connect to
+    # the host's port 443 via nginx stream SNI routing).
     return {
         "reality_sni": config.reality_sni,
-        "xray_upstream": f"172.20.0.3:{config.xray_internal_port}",
+        "xray_upstream": "172.20.0.3:443",
         "incoming_ip": config.incoming_ip,
         "enable_port_8443": config.enable_port_8443,
         "https_port": config.https_port,

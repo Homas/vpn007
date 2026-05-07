@@ -728,7 +728,7 @@ def _provision_xray_inbound(config: DeployConfig) -> None:
         "enable": True,
         "expiryTime": 0,
         "listen": "",
-        "port": config.xray_internal_port,
+        "port": 443,
         "protocol": "vless",
         "settings": inbound_settings,
         "streamSettings": stream_settings,
