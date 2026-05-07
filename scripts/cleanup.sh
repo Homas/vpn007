@@ -192,6 +192,11 @@ fi
 # Prune any orphaned networks
 docker network prune -f 2>/dev/null || true
 
+# Restart Docker daemon to clear stale state
+info "Restarting Docker daemon..."
+systemctl restart docker 2>/dev/null || service docker restart 2>/dev/null || \
+    warn "Could not restart Docker daemon."
+
 info "Docker containers and networks removed."
 echo ""
 

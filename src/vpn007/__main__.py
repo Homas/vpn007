@@ -740,8 +740,11 @@ def _provision_xray_inbound(config: DeployConfig) -> None:
             "xver": 0,
             "serverNames": [config.reality_sni],
             "privateKey": reality_keys.private_key,
-            "publicKey": reality_keys.public_key,
             "shortIds": [reality_keys.short_id],
+            "settings": {
+                "publicKey": reality_keys.public_key,
+                "fingerprint": "chrome",
+            },
         },
         "tcpSettings": {
             "acceptProxyProtocol": True,
