@@ -65,8 +65,8 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        # Rewrite redirects from backend to include the path prefix
-        proxy_redirect / {{ xui_path_prefix }}/;
+        # Rewrite backend redirects: prepend prefix to Location path
+        proxy_redirect ~^(https?://[^/]+)?/(.*)$ {{ xui_path_prefix }}/$2;
 
         # Rewrite absolute paths in HTML/JS/CSS responses
         sub_filter_once off;
@@ -90,8 +90,8 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        # Rewrite redirects from backend to include the path prefix
-        proxy_redirect / {{ awg_panel_path_prefix }}/;
+        # Rewrite backend redirects: prepend prefix to Location path
+        proxy_redirect ~^(https?://[^/]+)?/(.*)$ {{ awg_panel_path_prefix }}/$2;
 
         # Rewrite absolute paths in HTML/JS/CSS responses
         sub_filter_once off;
