@@ -73,35 +73,12 @@ server {
     }
 
     # AmneziaWG panel (IP-restricted + rate-limited)
-    # wg-easy does not support sub-path natively; prefix is stripped and
-    # responses are rewritten to include it.
+    # wg-easy does not support sub-path; redirect to the dedicated AWG panel port.
     location {{ awg_panel_path_prefix }}/ {
         include /etc/nginx/conf.d/approved_panel_ips.conf;
         deny all;
 
-        limit_req zone=panel_limit burst=10 nodelay;
-
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_pass http://127.0.0.1:{{ awg_panel_port }}/;
-
-        # Fix redirects: strip backend host/port, prepend prefix
-        proxy_redirect ~^https?://[^/]+(/.*)$ {{ awg_panel_path_prefix }}$1;
-        proxy_redirect / {{ awg_panel_path_prefix }}/;
-
-        # Rewrite absolute paths in HTML/JS/CSS responses
-        sub_filter_once off;
-        sub_filter_types text/html text/css application/javascript;
-        sub_filter 'href="/' 'href="{{ awg_panel_path_prefix }}/';
-        sub_filter 'src="/' 'src="{{ awg_panel_path_prefix }}/';
-        sub_filter 'action="/' 'action="{{ awg_panel_path_prefix }}/';
-        sub_filter 'fetch("/' 'fetch("{{ awg_panel_path_prefix }}/';
-        sub_filter '"/' '"{{ awg_panel_path_prefix }}/';
+        return 302 https://$host:{{ awg_panel_https_port }}/;
     }
 
     # Default: cover site
@@ -127,4 +104,40 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 {% endif %}
+}
+
+# AmneziaWG panel — dedicated HTTPS server on port {{ awg_panel_https_port }}
+# wg-easy does not support sub-path routing, so it gets its own port.
+# Protected by the same IP allowlist as the main panel endpoints.
+server {
+    listen {{ awg_panel_https_port }} ssl;
+    listen [::]:{{ awg_panel_https_port }} ssl;
+    http2 on;
+
+    server_name {{ domain }};
+
+    # TLS certificates (same as main server)
+    ssl_certificate     /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_protocols {{ ssl_protocols }};
+    ssl_ciphers TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers on;
+
+    # IP restriction
+    include /etc/nginx/conf.d/approved_panel_ips.conf;
+    deny all;
+
+    # Rate limiting
+    limit_req zone=panel_limit burst=10 nodelay;
+
+    location / {
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass http://127.0.0.1:{{ awg_panel_port }}/;
+    }
 }

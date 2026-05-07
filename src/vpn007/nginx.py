@@ -150,12 +150,18 @@ def _build_http_context(config: DeployConfig) -> dict:
     """Build the Jinja2 template context for the HTTP config."""
     cover_site_domain = _extract_cover_site_domain(config.cover_site_url)
 
+    # AWG panel HTTPS port: nginx terminates TLS on this port and proxies
+    # to wg-easy on 127.0.0.1:awg_panel_port. We use awg_panel_port + 1
+    # to avoid conflicting with wg-easy's own listener.
+    awg_panel_https_port = config.awg_panel_port + 1
+
     # Nginx runs on host network, reaches containers via their bridge IPs
     return {
         "domain": config.domain,
         "xui_path_prefix": config.xui_path_prefix,
         "awg_panel_path_prefix": config.awg_panel_path_prefix,
         "awg_panel_port": config.awg_panel_port,
+        "awg_panel_https_port": awg_panel_https_port,
         "three_x_ui_upstream": "172.20.0.3:2053",
         "ssl_protocols": _build_ssl_protocols(config.tls_versions),
         "cover_site_mode": config.cover_site_mode.value,

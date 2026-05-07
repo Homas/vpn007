@@ -204,7 +204,7 @@ class TestGenerateDeploymentSummary:
 
         assert "vpn.example.com" in summary
         assert config.xui_path_prefix in summary
-        assert config.awg_panel_path_prefix in summary
+        assert str(config.awg_panel_port + 1) in summary
         assert "34567" in summary
 
     def test_summary_contains_generated_files(self, tmp_path: Path) -> None:

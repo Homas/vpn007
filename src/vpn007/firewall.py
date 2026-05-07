@@ -107,6 +107,7 @@ def generate_nftables_config(config: DeployConfig) -> str:
         "enable_port_8443": config.enable_port_8443,
         "https_port": config.https_port,
         "awg_listen_port": config.awg_listen_port,
+        "awg_panel_https_port": config.awg_panel_port + 1,
         "outgoing_ip": config.outgoing_ip,
     }
 

@@ -504,7 +504,8 @@ def generate_deployment_summary(
     if config.enable_port_8443:
         lines.append(f"  HTTPS (alt):     https://{server}:8443/")
     lines.append(f"  3x-ui Panel:     https://{server}{config.xui_path_prefix}/")
-    lines.append(f"  AWG Panel:       https://{server}{config.awg_panel_path_prefix}/")
+    awg_https_port = config.awg_panel_port + 1
+    lines.append(f"  AWG Panel:       https://{server}:{awg_https_port}/")
     if config.awg_listen_port is not None:
         lines.append(f"  AmneziaWG (UDP): {server}:{config.awg_listen_port}")
     lines.append("")
@@ -522,6 +523,11 @@ def generate_deployment_summary(
         for hostname in config.approved_hostnames:
             lines.append(f"  {hostname}")
         lines.append("")
+    lines.append("Default Credentials:")
+    lines.append("  3x-ui:  admin / admin (change on first login)")
+    lines.append("  AWG:    set during first-time setup wizard")
+    lines.append("  Check:  docker exec -it vpn007_three_x_ui /app/x-ui setting -show")
+    lines.append("")
     lines.append("=" * 60)
     lines.append("")
     return "\n".join(lines)

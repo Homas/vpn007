@@ -182,11 +182,11 @@ class TestProperty8NginxRoutingCompleteness:
     def test_http_panel_locations_have_ip_restriction(
         self, config: DeployConfig
     ) -> None:
-        """Panel location blocks must include IP restriction."""
+        """Panel location/server blocks must include IP restriction."""
         output = generate_nginx_http_config(config)
-        # Both panel locations must include the approved IPs conf and deny all
-        assert output.count("include /etc/nginx/conf.d/approved_panel_ips.conf;") == 2
-        assert output.count("deny all;") == 2
+        # 3x-ui location + AWG redirect location + AWG dedicated server block
+        assert output.count("include /etc/nginx/conf.d/approved_panel_ips.conf;") == 3
+        assert output.count("deny all;") == 3
 
     @given(config=valid_deploy_config)
     def test_http_panel_locations_have_rate_limiting(
@@ -196,7 +196,7 @@ class TestProperty8NginxRoutingCompleteness:
         output = generate_nginx_http_config(config)
         assert "limit_req_zone" in output
         assert "limit_req zone=panel_limit burst=10 nodelay;" in output
-        # Rate limit must appear in both panel locations
+        # Rate limit in 3x-ui location + AWG dedicated server block
         assert output.count("limit_req zone=panel_limit burst=10 nodelay;") == 2
 
     @given(config=valid_deploy_config)

@@ -76,6 +76,9 @@ table inet filter {
         tcp dport 8443 accept
 
 {% endif %}
+        # Allow AmneziaWG panel HTTPS port
+        tcp dport {{ awg_panel_https_port }} accept
+
         # Allow AmneziaWG UDP port
         udp dport {{ awg_listen_port }} accept
 

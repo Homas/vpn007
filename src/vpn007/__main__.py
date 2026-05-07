@@ -243,6 +243,9 @@ def main(argv: list[str] | None = None) -> int:
     # 6d-2. Configure 3x-ui panel base path
     _configure_three_x_ui(config, compose_path)
 
+    # 6d-3. Provision VLESS+Reality inbound in 3x-ui via API
+    _provision_xray_inbound(config)
+
     # 6e. Apply firewall rules (before certbot — certbot needs to punch a hole)
     logger.info("Applying firewall rules...")
     nftables_path = config.output_dir / "nftables.conf"
@@ -551,6 +554,212 @@ def _configure_three_x_ui(config: DeployConfig, compose_path: Path) -> None:
         logger.info("3x-ui restarted with webBasePath: %s", web_base_path)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         logger.warning("Failed to restart 3x-ui: %s", exc)
+
+
+def _provision_xray_inbound(config: DeployConfig) -> None:
+    """Create the VLESS+Reality inbound and default client in 3x-ui via its API.
+
+    Uses the 3x-ui REST API to:
+    1. Log in with default credentials (admin/admin).
+    2. Check if the inbound already exists (idempotent).
+    3. Create the VLESS+Reality inbound with the default client UUID.
+
+    This ensures the client config generated in
+    ``/opt/vpn007/clients/xray-default-client.txt`` actually works.
+    """
+    import json
+    import time
+    import urllib.request
+    import urllib.error
+
+    # Resolve Reality keys (same logic as xray config generation)
+    from vpn007.crypto import generate_reality_keypair
+
+    reality_keys = config.reality_keys
+    if reality_keys is None:
+        # Keys were auto-generated during config generation; read them from
+        # the generated xray config to stay consistent.
+        xray_config_path = config.output_dir / "xray" / "config.json"
+        if xray_config_path.exists():
+            try:
+                xray_data = json.loads(xray_config_path.read_text())
+                inbounds = xray_data.get("inbounds", [])
+                if inbounds:
+                    rs = inbounds[0].get("streamSettings", {}).get("realitySettings", {})
+                    from vpn007.models import RealityKeys
+                    reality_keys = RealityKeys(
+                        private_key=rs.get("privateKey", ""),
+                        public_key="",  # not in server config
+                        short_id=rs.get("shortIds", [""])[0],
+                    )
+            except (json.JSONDecodeError, KeyError, IndexError):
+                pass
+
+    if reality_keys is None:
+        logger.warning("Cannot provision inbound: Reality keys not available.")
+        return
+
+    # Read the client UUID from the generated client config
+    client_config_path = (
+        config.output_dir / "clients" / f"xray-{config.xray_initial_client}.txt"
+    )
+    if not client_config_path.exists():
+        logger.warning(
+            "Cannot provision inbound: client config not found at %s",
+            client_config_path,
+        )
+        return
+
+    vless_link = client_config_path.read_text().strip()
+    # Extract UUID from vless://{uuid}@...
+    if not vless_link.startswith("vless://"):
+        logger.warning("Invalid VLESS link format in client config.")
+        return
+    client_uuid = vless_link.split("@")[0].removeprefix("vless://")
+
+    # 3x-ui API base URL (container is on bridge network at 172.20.0.3)
+    base_url = "http://172.20.0.3:2053"
+    web_base_path = config.xui_path_prefix
+
+    # Wait for 3x-ui to be ready (it was just restarted)
+    logger.info("Waiting for 3x-ui API to be ready...")
+    for _ in range(10):
+        try:
+            req = urllib.request.Request(f"{base_url}{web_base_path}/")
+            with urllib.request.urlopen(req, timeout=5):
+                break
+        except (urllib.error.URLError, OSError):
+            time.sleep(2)
+    else:
+        logger.warning("3x-ui API not ready after 20s — skipping inbound provisioning.")
+        return
+
+    # Step 1: Login
+    logger.info("Logging into 3x-ui API...")
+    login_data = json.dumps({"username": "admin", "password": "admin"}).encode()
+    login_req = urllib.request.Request(
+        f"{base_url}{web_base_path}/login",
+        data=login_data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(login_req, timeout=10) as resp:
+            login_resp = json.loads(resp.read())
+            if not login_resp.get("success"):
+                logger.info(
+                    "3x-ui login with default credentials failed — "
+                    "credentials may have been changed. Skipping inbound provisioning."
+                )
+                return
+            # Extract session cookie
+            cookie = resp.headers.get("Set-Cookie", "")
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+        logger.warning("3x-ui login failed: %s", exc)
+        return
+
+    # Step 2: Check if inbound already exists
+    list_req = urllib.request.Request(
+        f"{base_url}{web_base_path}/panel/api/inbounds/list",
+        headers={"Cookie": cookie},
+    )
+    try:
+        with urllib.request.urlopen(list_req, timeout=10) as resp:
+            list_resp = json.loads(resp.read())
+            inbounds = list_resp.get("obj", [])
+            for inbound in inbounds:
+                if inbound.get("tag") == "vless-reality":
+                    logger.info(
+                        "VLESS+Reality inbound already exists in 3x-ui (id=%s) — skipping.",
+                        inbound.get("id"),
+                    )
+                    return
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to list 3x-ui inbounds: %s", exc)
+        return
+
+    # Step 3: Create the inbound
+    logger.info("Creating VLESS+Reality inbound with client %s...", client_uuid)
+
+    inbound_settings = json.dumps({
+        "clients": [
+            {
+                "id": client_uuid,
+                "flow": "",
+                "email": config.xray_initial_client,
+                "limitIp": 0,
+                "totalGB": 0,
+                "expiryTime": 0,
+                "enable": True,
+            }
+        ],
+        "decryption": "none",
+        "fallbacks": [],
+    })
+
+    stream_settings = json.dumps({
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+            "show": False,
+            "dest": f"{config.reality_sni}:443",
+            "xver": 0,
+            "serverNames": [config.reality_sni],
+            "privateKey": reality_keys.private_key,
+            "shortIds": [reality_keys.short_id],
+        },
+        "tcpSettings": {
+            "acceptProxyProtocol": True,
+            "header": {"type": "none"},
+        },
+    })
+
+    sniffing = json.dumps({
+        "enabled": True,
+        "destOverride": ["http", "tls", "quic"],
+    })
+
+    add_data = json.dumps({
+        "up": 0,
+        "down": 0,
+        "total": 0,
+        "remark": "VLESS+Reality (VPN007)",
+        "enable": True,
+        "expiryTime": 0,
+        "listen": "",
+        "port": config.xray_internal_port,
+        "protocol": "vless",
+        "settings": inbound_settings,
+        "streamSettings": stream_settings,
+        "tag": "vless-reality",
+        "sniffing": sniffing,
+    }).encode()
+
+    add_req = urllib.request.Request(
+        f"{base_url}{web_base_path}/panel/api/inbounds/add",
+        data=add_data,
+        headers={
+            "Content-Type": "application/json",
+            "Cookie": cookie,
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(add_req, timeout=15) as resp:
+            add_resp = json.loads(resp.read())
+            if add_resp.get("success"):
+                logger.info(
+                    "VLESS+Reality inbound created successfully in 3x-ui."
+                )
+            else:
+                logger.warning(
+                    "3x-ui inbound creation returned: %s",
+                    add_resp.get("msg", "unknown error"),
+                )
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to create 3x-ui inbound: %s", exc)
 
 
 def _copy_letsencrypt_cert_to_nginx(config: DeployConfig) -> None:
