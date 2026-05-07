@@ -250,6 +250,20 @@ def _parse_awg_obfuscation(env: dict[str, str | None]) -> AwgObfuscation | None:
             raise ValueError(f"Missing required AWG obfuscation parameter: {key}")
         return int(val.strip())
 
+    # Default to WebRTC/STUN signatures when I params are absent from env.
+    # If the key is present (even as empty string AWG_I1=), respect that choice.
+    _AWG_I_DEFAULTS = {
+        "AWG_I1": "<b 0x000100002112a442><r 12>",
+        "AWG_I2": "<b 0x0101><r 4><t><r 8>",
+        "AWG_I3": "<r 32>",
+    }
+
+    def _get_i(key: str) -> str:
+        if key not in env:
+            return _AWG_I_DEFAULTS.get(key, "")
+        val = env[key]
+        return val.strip() if val else ""
+
     return AwgObfuscation(
         s1=_get_int("AWG_S1"),
         s2=_get_int("AWG_S2"),
@@ -262,11 +276,11 @@ def _parse_awg_obfuscation(env: dict[str, str | None]) -> AwgObfuscation | None:
         jc=_get_int("AWG_JC", default=4),
         jmin=_get_int("AWG_JMIN", default=50),
         jmax=_get_int("AWG_JMAX", default=1000),
-        i1=env.get("AWG_I1", "").strip() or "",
-        i2=env.get("AWG_I2", "").strip() or "",
-        i3=env.get("AWG_I3", "").strip() or "",
-        i4=env.get("AWG_I4", "").strip() or "",
-        i5=env.get("AWG_I5", "").strip() or "",
+        i1=_get_i("AWG_I1"),
+        i2=_get_i("AWG_I2"),
+        i3=_get_i("AWG_I3"),
+        i4=_get_i("AWG_I4"),
+        i5=_get_i("AWG_I5"),
     )
 
 

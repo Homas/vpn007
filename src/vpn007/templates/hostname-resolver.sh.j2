@@ -117,11 +117,13 @@ update_panel_access() {
     mv "${CONF_TMP}" "${CONF_FILE}"
     log_info "Updated approved panel IPs configuration"
 
-    # Reload Nginx to pick up the new IPs
-    if docker compose -f "${COMPOSE_DIR}/docker-compose.yml" exec reverse_proxy nginx -s reload 2>/dev/null; then
-        log_info "Nginx reloaded successfully"
+    # Restart Nginx container to pick up the new IPs
+    # A full restart is needed because the file is bind-mounted read-only;
+    # nginx -s reload may use a stale cached version of the file.
+    if docker compose -f "${COMPOSE_DIR}/docker-compose.yml" restart reverse_proxy 2>/dev/null; then
+        log_info "Nginx container restarted successfully"
     else
-        log_warn "Failed to reload Nginx — config will take effect on next restart"
+        log_warn "Failed to restart Nginx container — config will take effect on next restart"
     fi
 }
 

@@ -155,6 +155,9 @@ def _write_file(path: Path, content: str) -> None:
     """Write *content* to *path*, creating parent directories as needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+    # Make shell scripts executable
+    if path.suffix == ".sh":
+        path.chmod(0o755)
     logger.debug("Wrote %s (%d bytes)", path, len(content))
 
 

@@ -229,12 +229,6 @@ fi
 info "Docker images cleaned up."
 echo ""
 
-# Restart Docker daemon to clear stale state
-info "Restarting Docker daemon..."
-systemctl restart docker 2>/dev/null || service docker restart 2>/dev/null || \
-    warn "Could not restart Docker daemon."
-echo ""
-
 # ---------------------------------------------------------------------------
 # 3. Remove nftables firewall rules
 # ---------------------------------------------------------------------------
@@ -405,6 +399,13 @@ echo "============================================================"
 info "VPN007 cleanup complete."
 echo "============================================================"
 echo ""
+
+# Restart Docker daemon to clear stale state
+info "Restarting Docker daemon..."
+systemctl restart docker 2>/dev/null || service docker restart 2>/dev/null || \
+    warn "Could not restart Docker daemon."
+echo ""
+
 if [[ "$KEEP_DATA" == "true" && -n "$DEPLOY_DIR" ]]; then
     echo "  Data preserved at: $DEPLOY_DIR"
     echo "  To fully remove: rm -rf $DEPLOY_DIR"

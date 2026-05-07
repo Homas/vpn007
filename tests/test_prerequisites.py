@@ -209,7 +209,7 @@ class TestCheckDependencies:
         )
         deps = check_dependencies()
         assert all(v is not None for v in deps.values())
-        assert len(deps) == 6
+        assert len(deps) == 7
 
     @patch("vpn007.prerequisites.shutil.which", return_value=None)
     def test_all_deps_missing(self, mock_which: MagicMock) -> None:

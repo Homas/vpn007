@@ -37,6 +37,7 @@ REQUIRED_DEPENDENCIES: dict[str, tuple[str, str, list[str]]] = {
     "nftables": ("nft", "0.9.0", ["nft", "--version"]),
     "curl": ("curl", "7.0.0", ["curl", "--version"]),
     "git": ("git", "2.0.0", ["git", "--version"]),
+    "dig": ("dig", "9.0.0", ["dig", "-v"]),
 }
 
 # ---------------------------------------------------------------------------
@@ -49,6 +50,7 @@ _APT_PACKAGES: dict[str, str] = {
     "nftables": "nftables",
     "curl": "curl",
     "git": "git",
+    "dig": "dnsutils",
 }
 
 _APK_PACKAGES: dict[str, str] = {
@@ -58,6 +60,7 @@ _APK_PACKAGES: dict[str, str] = {
     "nftables": "nftables",
     "curl": "curl",
     "git": "git",
+    "dig": "bind-tools",
 }
 
 # Minimum resource thresholds

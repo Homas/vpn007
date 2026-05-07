@@ -161,7 +161,7 @@ class TestParseAwgObfuscation:
         assert result is not None
         assert result.jc == 4  # default
         assert result.jmin == 50  # default
-        assert result.i1 == ""  # default (empty CPS string)
+        assert result.i1 == "<b 0x000100002112a442><r 12>"  # WebRTC/STUN default (key absent from env)
 
     def test_no_vars_returns_none(self) -> None:
         assert _parse_awg_obfuscation({}) is None
