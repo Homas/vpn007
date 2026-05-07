@@ -129,6 +129,28 @@ def _copy_awg_build_files(output_dir: Path, files: dict[str, str]) -> None:
             )
 
 
+def _copy_nginx_build_files(output_dir: Path, files: dict[str, str]) -> None:
+    """Copy Nginx custom image build files to the output directory.
+
+    Copies ``Dockerfile.nginx`` from the project root into the output
+    directory so that ``docker compose build reverse_proxy`` works from
+    the deploy directory.
+    """
+    project_root = Path(__file__).parent.parent.parent
+    dockerfile_src = project_root / "Dockerfile.nginx"
+
+    if dockerfile_src.is_file():
+        content = dockerfile_src.read_text(encoding="utf-8")
+        files["Dockerfile.nginx"] = content
+        _write_file(output_dir / "Dockerfile.nginx", content)
+    else:
+        logger.warning(
+            "Nginx build file not found: %s — "
+            "reverse proxy build may fail.",
+            dockerfile_src,
+        )
+
+
 def _write_file(path: Path, content: str) -> None:
     """Write *content* to *path*, creating parent directories as needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -269,6 +291,10 @@ def generate_all(config: DeployConfig) -> dict[str, str]:
     compose_content = generate_compose(config)
     files["docker-compose.yml"] = compose_content
     _write_file(output_dir / "docker-compose.yml", compose_content)
+
+    # 2b. Copy build files for custom Docker images
+    _copy_nginx_build_files(output_dir, files)
+    _copy_awg_build_files(output_dir, files)
 
     # 3. Nginx main config (top-level nginx.conf with stream module loading)
     logger.info("Generating nginx/nginx.conf...")

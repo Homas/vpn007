@@ -33,7 +33,7 @@ ALL_SERVICES = LONG_RUNNING_SERVICES | UTILITY_SERVICES
 
 # Expected Docker images for each service.
 EXPECTED_IMAGES = {
-    "reverse_proxy": "nginx:mainline",
+    "reverse_proxy": "vpn007_nginx:latest",
     "three_x_ui": "ghcr.io/mhsanaei/3x-ui:latest",
     "amneziawg": "ghcr.io/wg-easy/wg-easy:15",
     "tailscale": "tailscale/tailscale:latest",

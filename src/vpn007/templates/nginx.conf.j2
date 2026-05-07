@@ -9,7 +9,8 @@ worker_processes  auto;
 error_log  /var/log/nginx/error.log notice;
 pid        /var/run/nginx.pid;
 
-load_module /usr/lib/nginx/modules/ngx_stream_module.so;
+# Load dynamic modules installed via packages (e.g. libnginx-mod-stream)
+include /etc/nginx/modules-enabled/*.conf;
 
 events {
     worker_connections  1024;
