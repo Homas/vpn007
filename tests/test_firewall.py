@@ -177,7 +177,7 @@ class TestProperty10NftablesDefaultDeny:
 
     @given(config=valid_deploy_config)
     def test_port_80_not_in_base_rules(self, config: DeployConfig) -> None:
-        """Port 80 must NOT be in the base accept rules.
+        """TCP port 80 must NOT be in the base accept rules.
 
         Port 80 is opened dynamically by the certbot renewal script's
         pre/post-hook only during the brief renewal window.
@@ -185,17 +185,17 @@ class TestProperty10NftablesDefaultDeny:
         import re
 
         output = generate_nftables_config(config)
-        # Check that there's no accept rule for port 80 in the input chain
-        # (comments mentioning port 80 are fine)
+        # Check that there's no TCP accept rule for port 80 in the input chain
+        # (UDP port 80 for AWG is fine; comments mentioning port 80 are fine)
         for line in output.splitlines():
             stripped = line.strip()
             if stripped.startswith("#"):
                 continue
-            # No accept rule should reference exactly port 80 (not 8080, 10080, 58000, etc.)
-            if "accept" in stripped and "dport" in stripped:
+            # Only check TCP rules (not UDP — AWG might use port 80 UDP)
+            if "accept" in stripped and "tcp" in stripped and "dport" in stripped:
                 port_section = stripped.split("dport")[1].split("accept")[0]
                 assert not re.search(r"\b80\b", port_section), (
-                    f"Found port 80 accept rule in base config: {line!r}"
+                    f"Found TCP port 80 accept rule in base config: {line!r}"
                 )
 
     @given(config=valid_deploy_config)

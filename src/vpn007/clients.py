@@ -45,6 +45,7 @@ def provision_xray_client(
     config: DeployConfig,
     client_name: str = _DEFAULT_XRAY_CLIENT_NAME,
     client_uuid: str | None = None,
+    reality_keys: RealityKeys | None = None,
 ) -> XrayClientConfig:
     """Provision an initial Xray VLESS+Reality client.
 
@@ -63,6 +64,9 @@ def provision_xray_client(
         fragment and output filename).
     client_uuid:
         Optional pre-generated UUID. If ``None``, a new UUID is generated.
+    reality_keys:
+        Optional pre-generated Reality keys. If ``None``, uses config or
+        generates new ones.
 
     Returns
     -------
@@ -72,12 +76,12 @@ def provision_xray_client(
     if client_uuid is None:
         client_uuid = str(uuid.uuid4())
 
-    reality_keys: RealityKeys
-    if config.reality_keys is not None:
-        reality_keys = config.reality_keys
-    else:
-        reality_keys = generate_reality_keypair()
-        logger.info("Auto-generated Reality keys for Xray client provisioning")
+    if reality_keys is None:
+        if config.reality_keys is not None:
+            reality_keys = config.reality_keys
+        else:
+            reality_keys = generate_reality_keypair()
+            logger.info("Auto-generated Reality keys for Xray client provisioning")
 
     # Determine the server address clients should connect to.
     # Use domain for VLESS (TLS-based, needs SNI match with cert).

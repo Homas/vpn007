@@ -109,12 +109,11 @@ class TestProperty4XrayConfigPreservesRealityParams:
 
     @given(config=_valid_deploy_config_with_keys())
     def test_internal_port_matches(self, config: DeployConfig) -> None:
-        """The inbound listen port must match xray_internal_port."""
+        """The inbound listen port must be 443 (clients connect via nginx on 443)."""
         parsed = json.loads(generate_xray_config(config))
         inbound = parsed["inbounds"][0]
-        assert inbound.get("port") == config.xray_internal_port, (
-            f"Expected port {config.xray_internal_port}, "
-            f"got {inbound.get('port')}"
+        assert inbound.get("port") == 443, (
+            f"Expected port 443, got {inbound.get('port')}"
         )
 
     @given(config=_valid_deploy_config_with_keys())

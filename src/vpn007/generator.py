@@ -330,7 +330,20 @@ def generate_all(config: DeployConfig) -> dict[str, str]:
 
     # 6. Xray config (with initial client UUID pre-populated)
     import uuid as _uuid_mod
+    from vpn007.crypto import generate_reality_keypair as _gen_reality_keys
+
     initial_client_uuid = str(_uuid_mod.uuid4())
+
+    # Generate Reality keys once and reuse for both xray config and client config
+    if config.reality_keys is None:
+        reality_keys_used = _gen_reality_keys()
+        logger.info("Auto-generated Reality x25519 key pair and short_id")
+        # Temporarily set on config so generate_xray_config and
+        # provision_xray_client use the same keys
+        config.reality_keys = reality_keys_used
+    else:
+        reality_keys_used = config.reality_keys
+
     logger.info("Generating xray/config.json...")
     xray_conf = generate_xray_config(
         config,
