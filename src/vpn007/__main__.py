@@ -236,6 +236,7 @@ def main(argv: list[str] | None = None) -> int:
             3,
         )
         logger.debug("Last error: %s", exc)
+        _print_cleanup_instructions(config)
         return EXIT_DOCKER_ERROR
 
     # 6e. Apply firewall rules (before certbot — certbot needs to punch a hole)
@@ -249,6 +250,7 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("Firewall provisioning failed: %s", exc.message)
         if exc.remediation:
             logger.info("Remediation: %s", exc.remediation)
+        _print_cleanup_instructions(config)
         return EXIT_SYSTEM_ERROR
 
     # 6f. Acquire TLS certificate
@@ -274,6 +276,7 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("Systemd timer installation failed: %s", exc.message)
         if exc.remediation:
             logger.info("Remediation: %s", exc.remediation)
+        _print_cleanup_instructions(config)
         return EXIT_SYSTEM_ERROR
 
     # 6h. Provision AmneziaWG kernel module (non-fatal — falls back to userspace)
@@ -306,6 +309,45 @@ def main(argv: list[str] | None = None) -> int:
 
     logger.info("Deployment complete.")
     return EXIT_OK
+
+
+# ---------------------------------------------------------------------------
+# Cleanup instructions
+# ---------------------------------------------------------------------------
+
+
+def _print_cleanup_instructions(config: DeployConfig) -> None:
+    """Print cleanup instructions when deployment fails mid-way."""
+    output_dir = config.output_dir
+    logger.error("")
+    logger.error("=" * 60)
+    logger.error("  DEPLOYMENT FAILED — Cleanup Instructions")
+    logger.error("=" * 60)
+    logger.error("")
+    logger.error("The deployment failed after partial setup. To clean up:")
+    logger.error("")
+    logger.error("  # 1. Stop and remove VPN007 containers")
+    logger.error("  cd %s", output_dir)
+    logger.error("  docker compose --project-name vpn007 down --remove-orphans")
+    logger.error("")
+    logger.error("  # 2. Remove any broken networks")
+    logger.error("  docker network prune -f")
+    logger.error("")
+    logger.error("  # 3. Flush VPN007 firewall rules (if partially applied)")
+    logger.error("  sudo nft delete table inet filter 2>/dev/null")
+    logger.error("  sudo nft delete table ip nat 2>/dev/null")
+    logger.error("")
+    logger.error("  # 4. Disable VPN007 systemd timers (if partially installed)")
+    logger.error(
+        "  sudo systemctl disable --now "
+        "blocklist-updater.timer hostname-resolver.timer "
+        "certbot-renew.timer 2>/dev/null"
+    )
+    logger.error("")
+    logger.error("After fixing the issue, re-run: sudo vpn007")
+    logger.error("Client configs in %s/clients/ are preserved.", output_dir)
+    logger.error("=" * 60)
+    logger.error("")
 
 
 # ---------------------------------------------------------------------------
