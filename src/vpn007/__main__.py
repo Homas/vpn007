@@ -583,22 +583,50 @@ def _provision_xray_inbound(config: DeployConfig) -> None:
     reality_keys = config.reality_keys
     if reality_keys is None:
         # Keys were auto-generated during config generation; read them from
-        # the generated xray config to stay consistent.
+        # the generated xray config and client config to stay consistent.
         xray_config_path = config.output_dir / "xray" / "config.json"
+        client_config_path = (
+            config.output_dir / "clients" / f"xray-{config.xray_initial_client}.txt"
+        )
+
+        private_key = ""
+        public_key = ""
+        short_id = ""
+
+        # Get private key and shortId from xray config
         if xray_config_path.exists():
             try:
                 xray_data = json.loads(xray_config_path.read_text())
                 inbounds = xray_data.get("inbounds", [])
                 if inbounds:
                     rs = inbounds[0].get("streamSettings", {}).get("realitySettings", {})
-                    from vpn007.models import RealityKeys
-                    reality_keys = RealityKeys(
-                        private_key=rs.get("privateKey", ""),
-                        public_key="",  # not in server config
-                        short_id=rs.get("shortIds", [""])[0],
-                    )
+                    private_key = rs.get("privateKey", "")
+                    short_id = rs.get("shortIds", [""])[0]
             except (json.JSONDecodeError, KeyError, IndexError):
                 pass
+
+        # Get public key from client config (pbk= parameter)
+        if client_config_path.exists():
+            try:
+                from urllib.parse import urlparse, parse_qs
+                link = client_config_path.read_text().strip()
+                if "pbk=" in link:
+                    query_str = link.split("?", 1)[1].split("#")[0]
+                    params = parse_qs(query_str)
+                    public_key = params.get("pbk", [""])[0]
+                    # Also use shortId from client config (authoritative)
+                    if params.get("sid"):
+                        short_id = params["sid"][0]
+            except (ValueError, IndexError, KeyError):
+                pass
+
+        if private_key:
+            from vpn007.models import RealityKeys
+            reality_keys = RealityKeys(
+                private_key=private_key,
+                public_key=public_key,
+                short_id=short_id,
+            )
 
     if reality_keys is None:
         logger.warning("Cannot provision inbound: Reality keys not available.")
@@ -712,6 +740,7 @@ def _provision_xray_inbound(config: DeployConfig) -> None:
             "xver": 0,
             "serverNames": [config.reality_sni],
             "privateKey": reality_keys.private_key,
+            "publicKey": reality_keys.public_key,
             "shortIds": [reality_keys.short_id],
         },
         "tcpSettings": {
