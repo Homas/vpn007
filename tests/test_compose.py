@@ -35,7 +35,7 @@ ALL_SERVICES = LONG_RUNNING_SERVICES | UTILITY_SERVICES
 EXPECTED_IMAGES = {
     "reverse_proxy": "nginx:mainline",
     "three_x_ui": "ghcr.io/mhsanaei/3x-ui:latest",
-    "amneziawg": "ghcr.io/wg-easy/wg-easy:15",
+    "amneziawg": "ghcr.io/wg-easy/wg-easy:15.3.0-beta.2",
     "tailscale": "tailscale/tailscale:latest",
     "cover_site": "nginx:alpine",
     "certbot": "certbot/certbot:latest",
@@ -328,13 +328,13 @@ class TestComposeAmneziawgConfig:
         assert "WG_DEFAULT_ADDRESS=10.8.0.x" in awg_env
         assert "WG_DEFAULT_DNS=1.1.1.1" in awg_env
 
-    def test_amneziawg_no_experimental_flags(self) -> None:
-        """wg-easy v15.2+ has native AWG 2.0 — no EXPERIMENTAL flags."""
+    def test_amneziawg_experimental_awg_enabled(self) -> None:
+        """wg-easy v15 requires EXPERIMENTAL_AWG=true for AmneziaWG obfuscation."""
         config = DeployConfig(domain="vpn.example.com", awg_listen_port=34567)
         parsed = yaml.safe_load(generate_compose(config))
         awg_env = parsed["services"]["amneziawg"]["environment"]
-        assert not any("EXPERIMENTAL_AWG" in str(e) for e in awg_env)
-        assert not any("OVERRIDE_AUTO_AWG" in str(e) for e in awg_env)
+        assert "EXPERIMENTAL_AWG=true" in awg_env
+        assert "OVERRIDE_AUTO_AWG=awg" in awg_env
 
     def test_amneziawg_lib_modules_mount(self) -> None:
         config = DeployConfig(domain="vpn.example.com", awg_listen_port=34567)
@@ -400,29 +400,29 @@ class TestComposeAwgImage:
     """Verify AmneziaWG 2.0 configuration in docker-compose generation."""
 
     def test_amneziawg_uses_wg_easy_image(self) -> None:
-        """amneziawg uses ghcr.io/wg-easy/wg-easy:15 (supports AWG 2.0 since v15.2.0)."""
+        """amneziawg uses ghcr.io/wg-easy/wg-easy:15.3.0-beta.2 for AWG support."""
         config = DeployConfig(
             domain="vpn.example.com",
             awg_listen_port=34567,
         )
         parsed = yaml.safe_load(generate_compose(config))
         awg = parsed["services"]["amneziawg"]
-        assert awg["image"] == "ghcr.io/wg-easy/wg-easy:15"
+        assert awg["image"] == "ghcr.io/wg-easy/wg-easy:15.3.0-beta.2"
         assert awg.get("build") is None, "Should not have build directive"
 
-    def test_amneziawg_no_experimental_flags(self) -> None:
-        """wg-easy v15.2+ has native AWG 2.0 support, no EXPERIMENTAL flags needed."""
+    def test_amneziawg_experimental_awg_flags(self) -> None:
+        """wg-easy v15 requires EXPERIMENTAL_AWG and OVERRIDE_AUTO_AWG for AWG."""
         config = DeployConfig(
             domain="vpn.example.com",
             awg_listen_port=34567,
         )
         parsed = yaml.safe_load(generate_compose(config))
         awg_env = parsed["services"]["amneziawg"]["environment"]
-        assert not any("EXPERIMENTAL_AWG" in str(e) for e in awg_env), (
-            "Must not set EXPERIMENTAL_AWG"
+        assert any("EXPERIMENTAL_AWG=true" in str(e) for e in awg_env), (
+            "Must set EXPERIMENTAL_AWG=true"
         )
-        assert not any("OVERRIDE_AUTO_AWG" in str(e) for e in awg_env), (
-            "Must not set OVERRIDE_AUTO_AWG"
+        assert any("OVERRIDE_AUTO_AWG=awg" in str(e) for e in awg_env), (
+            "Must set OVERRIDE_AUTO_AWG=awg"
         )
 
     def test_amneziawg_has_common_env_vars(self) -> None:
