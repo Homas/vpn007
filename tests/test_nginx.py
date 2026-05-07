@@ -46,13 +46,10 @@ class TestProperty8NginxRoutingCompleteness:
 
     @given(config=valid_deploy_config)
     def test_stream_listens_on_https_port(self, config: DeployConfig) -> None:
-        """Stream block must listen on the configured HTTPS port."""
+        """Stream block must listen on the configured HTTPS port on all interfaces."""
         output = generate_nginx_stream_config(config)
         port = config.https_port
-        if config.incoming_ip:
-            assert f"{config.incoming_ip}:{port}" in output
-        else:
-            assert f"listen {port};" in output
+        assert f"listen {port};" in output
         # IPv6 listener always present
         assert f"listen [::]:{port};" in output
 
@@ -95,13 +92,10 @@ class TestProperty8NginxRoutingCompleteness:
         assert "proxy_protocol on;" in output
 
     @given(config=valid_deploy_config)
-    def test_stream_incoming_ip_binding(self, config: DeployConfig) -> None:
-        """When incoming_ip is set, stream must bind to that IP."""
+    def test_stream_listens_on_all_interfaces(self, config: DeployConfig) -> None:
+        """Stream always listens on all interfaces (incoming_ip is for Docker port mapping only)."""
         output = generate_nginx_stream_config(config)
-        if config.incoming_ip:
-            assert f"listen {config.incoming_ip}:{config.https_port};" in output
-        else:
-            assert f"listen {config.https_port};" in output
+        assert f"listen {config.https_port};" in output
 
     # --- HTTP block properties ---
 
@@ -322,15 +316,16 @@ class TestTlsVersionConfig:
 
 
 class TestIncomingIpBinding:
-    """Verify incoming IP binding in stream config."""
+    """Verify incoming IP is NOT used in stream listen (Docker handles IP binding)."""
 
-    def test_incoming_ip_binds_to_specific_address(self) -> None:
-        """When incoming_ip is set, stream must bind to that IP on https_port."""
+    def test_incoming_ip_not_in_stream_listen(self) -> None:
+        """When incoming_ip is set, stream must NOT bind to it (Docker port mapping handles this)."""
         config = DeployConfig(
             domain="vpn.example.com", incoming_ip="203.0.113.10"
         )
         output = generate_nginx_stream_config(config)
-        assert f"listen 203.0.113.10:{config.https_port};" in output
+        assert "203.0.113.10" not in output
+        assert f"listen {config.https_port};" in output
 
     def test_no_incoming_ip_binds_all_interfaces(self) -> None:
         """When incoming_ip is not set, stream must listen on all interfaces."""
@@ -338,16 +333,17 @@ class TestIncomingIpBinding:
         output = generate_nginx_stream_config(config)
         assert f"listen {config.https_port};" in output
 
-    def test_incoming_ip_with_8443(self) -> None:
-        """When incoming_ip and 8443 are set, both ports bind to the IP."""
+    def test_8443_listens_on_all_interfaces(self) -> None:
+        """When 8443 is enabled, it listens on all interfaces regardless of incoming_ip."""
         config = DeployConfig(
             domain="vpn.example.com",
             incoming_ip="203.0.113.10",
             enable_port_8443=True,
         )
         output = generate_nginx_stream_config(config)
-        assert f"listen 203.0.113.10:{config.https_port};" in output
-        assert "listen 203.0.113.10:8443;" in output
+        assert f"listen {config.https_port};" in output
+        assert "listen 8443;" in output
+        assert "203.0.113.10" not in output
 
 
 # ---------------------------------------------------------------------------

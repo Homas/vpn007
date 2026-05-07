@@ -24,22 +24,16 @@ stream {
     # PROXY protocol is enabled globally because Nginx stream cannot set
     # proxy_protocol per-upstream in map mode. Both Xray and the HTTP
     # backend are configured to accept PROXY protocol headers.
+    #
+    # NOTE: incoming_ip binding is handled by Docker port mapping in
+    # docker-compose.yml. Inside the container, nginx listens on all
+    # interfaces (0.0.0.0 / [::]).
     server {
-{% if incoming_ip %}
-        listen {{ incoming_ip }}:{{ https_port }};
-        listen [::]:{{ https_port }};
-{% else %}
         listen {{ https_port }};
         listen [::]:{{ https_port }};
-{% endif %}
 {% if enable_port_8443 %}
-{% if incoming_ip %}
-        listen {{ incoming_ip }}:8443;
-        listen [::]:8443;
-{% else %}
         listen 8443;
         listen [::]:8443;
-{% endif %}
 {% endif %}
 
         ssl_preread on;
