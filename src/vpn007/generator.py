@@ -293,7 +293,6 @@ def generate_all(config: DeployConfig) -> dict[str, str]:
     _write_file(output_dir / "docker-compose.yml", compose_content)
 
     # 2b. Copy build files for custom Docker images
-    _copy_nginx_build_files(output_dir, files)
     _copy_awg_build_files(output_dir, files)
 
     # 3. Nginx main config (top-level nginx.conf with stream module loading)

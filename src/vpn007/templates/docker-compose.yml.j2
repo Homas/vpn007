@@ -4,10 +4,7 @@
 services:
   # --- Layer 4/7 Reverse Proxy (Nginx with stream module) ---
   reverse_proxy:
-    build:
-      context: .
-      dockerfile: Dockerfile.nginx
-    image: vpn007_nginx:latest
+    image: nginx:mainline
     container_name: vpn007_reverse_proxy
     restart: unless-stopped
     ports:

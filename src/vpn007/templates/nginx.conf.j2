@@ -2,15 +2,14 @@
 {# © Vadim Pavlov 2026 #}
 {# This is the top-level nginx.conf that loads the stream module and includes #}
 {# both the stream (L4 SNI routing) and http (L7 path routing) configurations. #}
+{# NOTE: In nginx:mainline the stream module is compiled statically into the #}
+{# binary — no load_module directive is needed. #}
 
 user  nginx;
 worker_processes  auto;
 
 error_log  /var/log/nginx/error.log notice;
 pid        /var/run/nginx.pid;
-
-# Load dynamic modules installed via packages (e.g. libnginx-mod-stream)
-include /etc/nginx/modules-enabled/*.conf;
 
 events {
     worker_connections  1024;
