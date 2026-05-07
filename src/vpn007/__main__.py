@@ -149,6 +149,11 @@ def main(argv: list[str] | None = None) -> int:
 
     logger.info("Configuration valid")
 
+    # Re-configure log path to be under output_dir (initial setup used CWD)
+    correct_log_path = config.output_dir / "deploy.log"
+    if correct_log_path != log_path:
+        setup_logging(correct_log_path, debug=debug)
+
     # 5. Generate all configuration files
     dry_run = getattr(args, "dry_run", False) or False
 
