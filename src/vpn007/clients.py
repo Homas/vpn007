@@ -44,17 +44,15 @@ _ADMIN_PASSWORD_CHARS = string.ascii_letters + string.digits + "!@#$%^&*"
 def provision_xray_client(
     config: DeployConfig,
     client_name: str = _DEFAULT_XRAY_CLIENT_NAME,
+    client_uuid: str | None = None,
 ) -> XrayClientConfig:
     """Provision an initial Xray VLESS+Reality client.
 
-    Generates a UUID for the client, resolves Reality keys from the config
-    (auto-generating if ``config.reality_keys`` is ``None``), and builds
-    a VLESS share link suitable for import into v2rayNG, v2rayN, Nekoray,
-    or Shadowrocket.  The QR code data is the share link itself.
-
-    This runs at config-generation time (before deployment), so the client
-    entry is baked into the Xray config that gets mounted into the 3x-ui
-    container.
+    Generates a UUID for the client (or uses the provided one), resolves
+    Reality keys from the config (auto-generating if
+    ``config.reality_keys`` is ``None``), and builds a VLESS share link
+    suitable for import into v2rayNG, v2rayN, Nekoray, or Shadowrocket.
+    The QR code data is the share link itself.
 
     Parameters
     ----------
@@ -63,13 +61,16 @@ def provision_xray_client(
     client_name:
         Human-readable name for the client (used in the share link
         fragment and output filename).
+    client_uuid:
+        Optional pre-generated UUID. If ``None``, a new UUID is generated.
 
     Returns
     -------
     XrayClientConfig
         The generated client configuration with share link and QR data.
     """
-    client_uuid = str(uuid.uuid4())
+    if client_uuid is None:
+        client_uuid = str(uuid.uuid4())
 
     reality_keys: RealityKeys
     if config.reality_keys is not None:

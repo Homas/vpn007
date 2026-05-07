@@ -328,9 +328,15 @@ def generate_all(config: DeployConfig) -> dict[str, str]:
     else:
         logger.info("Self-signed certificate already exists — skipping.")
 
-    # 6. Xray config
+    # 6. Xray config (with initial client UUID pre-populated)
+    import uuid as _uuid_mod
+    initial_client_uuid = str(_uuid_mod.uuid4())
     logger.info("Generating xray/config.json...")
-    xray_conf = generate_xray_config(config)
+    xray_conf = generate_xray_config(
+        config,
+        client_uuid=initial_client_uuid,
+        client_name=config.xray_initial_client,
+    )
     files["xray/config.json"] = xray_conf
     _write_file(output_dir / "xray" / "config.json", xray_conf)
 
@@ -403,7 +409,9 @@ def generate_all(config: DeployConfig) -> dict[str, str]:
     else:
         logger.info("Provisioning initial Xray client...")
         xray_client = provision_xray_client(
-            config, client_name=config.xray_initial_client
+            config,
+            client_name=config.xray_initial_client,
+            client_uuid=initial_client_uuid,
         )
         client_filename = f"xray-{xray_client.client_name}.txt"
         client_content = xray_client.vless_share_link + "\n"

@@ -38,7 +38,11 @@ def _create_jinja_env() -> Environment:
     )
 
 
-def generate_xray_config(config: DeployConfig) -> str:
+def generate_xray_config(
+    config: DeployConfig,
+    client_uuid: str | None = None,
+    client_name: str | None = None,
+) -> str:
     """Generate Xray ``config.json`` content from a deployment config.
 
     If ``config.reality_keys`` is ``None``, a new x25519 key pair and
@@ -47,6 +51,15 @@ def generate_xray_config(config: DeployConfig) -> str:
     ``serverNames``, the private key, and ``"acceptProxyProtocol": true``
     so that Xray can see real client IPs forwarded by Nginx's PROXY
     protocol header.
+
+    Parameters
+    ----------
+    config:
+        The deployment configuration.
+    client_uuid:
+        Optional UUID for the initial client to embed in the config.
+    client_name:
+        Optional name/email for the initial client.
 
     Returns the rendered JSON string.
     """
@@ -58,7 +71,7 @@ def generate_xray_config(config: DeployConfig) -> str:
     env = _create_jinja_env()
     template = env.get_template("xray-config.json.j2")
 
-    context = _build_template_context(config, reality_keys)
+    context = _build_template_context(config, reality_keys, client_uuid, client_name)
     rendered = template.render(context)
 
     # Validate that the output is well-formed JSON.
@@ -67,14 +80,26 @@ def generate_xray_config(config: DeployConfig) -> str:
     return rendered
 
 
-def _build_template_context(config: DeployConfig, keys: RealityKeys) -> dict:
+def _build_template_context(
+    config: DeployConfig,
+    keys: RealityKeys,
+    client_uuid: str | None = None,
+    client_name: str | None = None,
+) -> dict:
     """Build the Jinja2 template context for the Xray config."""
+    clients = []
+    if client_uuid:
+        clients.append({
+            "uuid": client_uuid,
+            "name": client_name or "default-client",
+        })
     return {
         "xray_internal_port": config.xray_internal_port,
         "reality_sni": config.reality_sni,
         "reality_private_key": keys.private_key,
         "reality_public_key": keys.public_key,
         "reality_short_id": keys.short_id,
+        "clients": clients,
     }
 
 

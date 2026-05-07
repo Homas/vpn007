@@ -42,8 +42,8 @@ def generate_reality_keypair() -> RealityKeys:
         format=PublicFormat.Raw,
     )
 
-    b64_private = base64.b64encode(raw_private).decode("ascii")
-    b64_public = base64.b64encode(raw_public).decode("ascii")
+    b64_private = base64.urlsafe_b64encode(raw_private).rstrip(b"=").decode("ascii")
+    b64_public = base64.urlsafe_b64encode(raw_public).rstrip(b"=").decode("ascii")
 
     short_id = os.urandom(4).hex()
 

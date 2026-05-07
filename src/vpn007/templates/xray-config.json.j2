@@ -10,7 +10,15 @@
       "port": {{ xray_internal_port }},
       "protocol": "vless",
       "settings": {
-        "clients": [],
+        "clients": [
+{% for client in clients %}
+          {
+            "id": "{{ client.uuid }}",
+            "flow": "",
+            "email": "{{ client.name }}"
+          }{{ "," if not loop.last }}
+{% endfor %}
+        ],
         "decryption": "none"
       },
       "streamSettings": {

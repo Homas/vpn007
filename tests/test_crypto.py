@@ -45,11 +45,12 @@ class TestRealityKeyPairUniqueness:
 
     @given(st.integers(min_value=1, max_value=100))
     def test_reality_keys_are_valid_x25519(self, _n: int) -> None:
-        """Each Reality key must be a valid base64-encoded 32-byte value."""
+        """Each Reality key must be a valid base64url-encoded 32-byte value."""
         keys = generate_reality_keypair()
 
-        raw_private = base64.b64decode(keys.private_key)
-        raw_public = base64.b64decode(keys.public_key)
+        # Reality keys use base64url without padding (Xray format)
+        raw_private = base64.urlsafe_b64decode(keys.private_key + "==")
+        raw_public = base64.urlsafe_b64decode(keys.public_key + "==")
 
         assert len(raw_private) == 32, (
             f"Reality private key must be 32 bytes, got {len(raw_private)}"
