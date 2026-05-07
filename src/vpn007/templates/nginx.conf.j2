@@ -1,0 +1,36 @@
+{# Template: nginx.conf — Main Nginx configuration that includes stream and http blocks #}
+{# © Vadim Pavlov 2026 #}
+{# This is the top-level nginx.conf that loads the stream module and includes #}
+{# both the stream (L4 SNI routing) and http (L7 path routing) configurations. #}
+
+user  nginx;
+worker_processes  auto;
+
+error_log  /var/log/nginx/error.log notice;
+pid        /var/run/nginx.pid;
+
+load_module modules/ngx_stream_module.so;
+
+events {
+    worker_connections  1024;
+}
+
+# Include the stream (L4) configuration for SNI-based routing
+include /etc/nginx/stream.conf;
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log  /var/log/nginx/access.log  main;
+
+    sendfile        on;
+    keepalive_timeout  65;
+
+    # Include http server blocks from conf.d/
+    include /etc/nginx/conf.d/*.conf;
+}

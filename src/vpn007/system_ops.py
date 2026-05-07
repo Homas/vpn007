@@ -339,6 +339,57 @@ def _install_kernel_headers() -> bool:
         return False
 
 
+def _clone_awg_kernel_source() -> bool:
+    """Clone the AmneziaWG kernel module source to /usr/src/amneziawg-1.0.
+
+    DKMS requires the module source to be present at
+    ``/usr/src/<module>-<version>/`` before it can build and install.
+
+    Returns
+    -------
+    bool
+        ``True`` if the source is available (already existed or was cloned).
+    """
+    src_dir = Path("/usr/src/amneziawg-1.0")
+    if src_dir.exists() and (src_dir / "dkms.conf").exists():
+        logger.info("AmneziaWG kernel source already present at %s", src_dir)
+        return True
+
+    logger.info("Cloning AmneziaWG kernel module source to %s ...", src_dir)
+    try:
+        # Remove partial clone if it exists without dkms.conf
+        if src_dir.exists():
+            shutil.rmtree(str(src_dir))
+
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                "--branch",
+                "v1.0",
+                "https://github.com/amnezia-vpn/amneziawg-linux-kernel-module.git",
+                str(src_dir),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=True,
+        )
+        logger.info("AmneziaWG kernel source cloned successfully.")
+        return True
+    except subprocess.CalledProcessError as exc:
+        logger.warning(
+            "Failed to clone AmneziaWG kernel source: %s",
+            exc.stderr.strip(),
+        )
+        return False
+    except FileNotFoundError:
+        logger.warning("'git' command not found. Cannot clone AmneziaWG source.")
+        return False
+
+
 def _compile_and_load_awg_module() -> bool:
     """Compile and load the AmneziaWG kernel module via DKMS.
 
@@ -358,6 +409,10 @@ def _compile_and_load_awg_module() -> bool:
         )
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         logger.warning("Failed to install DKMS: %s", exc)
+        return False
+
+    # Clone the kernel module source (DKMS requires /usr/src/amneziawg-1.0)
+    if not _clone_awg_kernel_source():
         return False
 
     # Build and install via DKMS

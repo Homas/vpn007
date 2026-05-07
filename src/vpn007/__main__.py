@@ -11,6 +11,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -441,6 +442,10 @@ def _run_certbot(config: DeployConfig, compose_path: Path) -> None:
 
         logger.info("TLS certificate acquired successfully.")
 
+        # Copy the Let's Encrypt cert to the nginx self-signed directory
+        # so nginx continues to use the same path (/etc/nginx/certs/).
+        _copy_letsencrypt_cert_to_nginx(config)
+
     finally:
         # Always close port 80
         logger.info("Closing port 80...")
@@ -470,6 +475,39 @@ def _run_certbot(config: DeployConfig, compose_path: Path) -> None:
         logger.info("Nginx reloaded with TLS certificate.")
     except subprocess.CalledProcessError as exc:
         logger.warning("Nginx reload failed: %s", exc.stderr.strip())
+
+
+def _copy_letsencrypt_cert_to_nginx(config: DeployConfig) -> None:
+    """Copy Let's Encrypt certificate to the nginx self-signed directory.
+
+    After certbot acquires a certificate, it lives at
+    ``{output_dir}/data/letsencrypt/live/{domain}/``.  Nginx is configured
+    to read certs from ``{output_dir}/nginx/self-signed/`` (mounted as
+    ``/etc/nginx/certs/`` inside the container).  This function copies the
+    LE cert files there so nginx uses the real certificate after reload.
+    """
+    le_live_dir = config.output_dir / "data" / "letsencrypt" / "live" / config.domain
+    nginx_cert_dir = config.output_dir / "nginx" / "self-signed"
+
+    fullchain_src = le_live_dir / "fullchain.pem"
+    privkey_src = le_live_dir / "privkey.pem"
+
+    if not fullchain_src.exists() or not privkey_src.exists():
+        logger.warning(
+            "Let's Encrypt cert files not found at %s — "
+            "nginx will continue using self-signed certificate.",
+            le_live_dir,
+        )
+        return
+
+    try:
+        shutil.copy2(str(fullchain_src), str(nginx_cert_dir / "fullchain.pem"))
+        shutil.copy2(str(privkey_src), str(nginx_cert_dir / "privkey.pem"))
+        logger.info(
+            "Copied Let's Encrypt certificate to %s", nginx_cert_dir
+        )
+    except OSError as exc:
+        logger.warning("Failed to copy LE cert to nginx dir: %s", exc)
 
 
 def _nft_open_port_80() -> None:

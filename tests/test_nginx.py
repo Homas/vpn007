@@ -39,10 +39,10 @@ class TestProperty8NginxRoutingCompleteness:
     # --- Stream block properties ---
 
     @given(config=valid_deploy_config)
-    def test_stream_loads_stream_module(self, config: DeployConfig) -> None:
-        """Stream config must load the ngx_stream_module."""
+    def test_stream_contains_stream_block(self, config: DeployConfig) -> None:
+        """Stream config must contain the stream block (load_module is in nginx.conf)."""
         output = generate_nginx_stream_config(config)
-        assert "load_module modules/ngx_stream_module.so;" in output
+        assert "stream {" in output
 
     @given(config=valid_deploy_config)
     def test_stream_listens_on_https_port(self, config: DeployConfig) -> None:

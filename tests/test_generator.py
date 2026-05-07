@@ -83,6 +83,7 @@ class TestGenerateAll:
 
         expected_keys = [
             "docker-compose.yml",
+            "nginx/nginx.conf",
             "nginx/stream.conf",
             "nginx/http.conf",
             "nginx/approved_panel_ips.conf",

@@ -15,6 +15,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+
 from vpn007.blocklist import generate_blocklist_updater
 from vpn007.clients import provision_awg_peer, provision_xray_client
 from vpn007.compose import generate_compose
@@ -28,6 +30,9 @@ from vpn007.nginx import generate_nginx_http_config, generate_nginx_stream_confi
 from vpn007.xray import generate_xray_config
 
 logger = logging.getLogger(__name__)
+
+# Path to the templates directory within the vpn007 package.
+_TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 # Subdirectories created inside the output directory.
 _OUTPUT_SUBDIRS: list[str] = [
@@ -131,6 +136,90 @@ def _write_file(path: Path, content: str) -> None:
     logger.debug("Wrote %s (%d bytes)", path, len(content))
 
 
+def _generate_self_signed_cert(domain: str, cert_dir: Path) -> None:
+    """Generate a self-signed TLS certificate for bootstrapping Nginx.
+
+    Creates ``fullchain.pem`` and ``privkey.pem`` in *cert_dir*.
+    This certificate is used only until certbot acquires a real one.
+    """
+    import datetime
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    cert_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate EC private key (P-256)
+    key = ec.generate_private_key(ec.SECP256R1())
+
+    # Build self-signed certificate
+    subject = issuer = x509.Name([
+        x509.NameAttribute(NameOID.COMMON_NAME, domain),
+    ])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.datetime.now(datetime.UTC))
+        .not_valid_after(
+            datetime.datetime.now(datetime.UTC)
+            + datetime.timedelta(days=365)
+        )
+        .add_extension(
+            x509.SubjectAlternativeName([x509.DNSName(domain)]),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
+
+    # Write private key
+    key_path = cert_dir / "privkey.pem"
+    key_path.write_bytes(
+        key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    )
+
+    # Write certificate
+    cert_path = cert_dir / "fullchain.pem"
+    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+
+    logger.info(
+        "Self-signed certificate generated for %s at %s", domain, cert_dir
+    )
+
+
+def _generate_nginx_main_config() -> str:
+    """Generate the top-level ``nginx.conf`` that loads the stream module.
+
+    The default ``nginx:mainline-alpine`` image's ``nginx.conf`` does not
+    include the stream block or load the stream module.  This custom
+    config loads ``ngx_stream_module.so``, includes ``/etc/nginx/stream.conf``
+    for L4 SNI routing, and includes ``/etc/nginx/conf.d/*.conf`` for the
+    HTTP server blocks.
+
+    Returns
+    -------
+    str
+        The rendered ``nginx.conf`` content.
+    """
+    env = Environment(
+        loader=FileSystemLoader(str(_TEMPLATES_DIR)),
+        autoescape=select_autoescape([]),
+        keep_trailing_newline=True,
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("nginx.conf.j2")
+    return template.render()
+
+
 def generate_all(config: DeployConfig) -> dict[str, str]:
     """Generate all deployment artifacts and write them to *config.output_dir*.
 
@@ -181,23 +270,38 @@ def generate_all(config: DeployConfig) -> dict[str, str]:
     files["docker-compose.yml"] = compose_content
     _write_file(output_dir / "docker-compose.yml", compose_content)
 
-    # 3. Nginx stream config (L4)
+    # 3. Nginx main config (top-level nginx.conf with stream module loading)
+    logger.info("Generating nginx/nginx.conf...")
+    nginx_conf = _generate_nginx_main_config()
+    files["nginx/nginx.conf"] = nginx_conf
+    _write_file(output_dir / "nginx" / "nginx.conf", nginx_conf)
+
+    # 4. Nginx stream config (L4)
     logger.info("Generating nginx/stream.conf...")
     stream_conf = generate_nginx_stream_config(config)
     files["nginx/stream.conf"] = stream_conf
     _write_file(output_dir / "nginx" / "stream.conf", stream_conf)
 
-    # 4. Nginx HTTP config (L7)
+    # 5. Nginx HTTP config (L7)
     logger.info("Generating nginx/http.conf...")
     http_conf = generate_nginx_http_config(config)
     files["nginx/http.conf"] = http_conf
     _write_file(output_dir / "nginx" / "http.conf", http_conf)
 
-    # 5. Initial approved_panel_ips.conf (must exist before Nginx starts)
+    # 6. Initial approved_panel_ips.conf (must exist before Nginx starts)
     logger.info("Generating nginx/approved_panel_ips.conf...")
     approved_ips_conf = generate_initial_approved_ips_conf(config)
     files["nginx/approved_panel_ips.conf"] = approved_ips_conf
     _write_file(output_dir / "nginx" / "approved_panel_ips.conf", approved_ips_conf)
+
+    # 5b. Self-signed bootstrap certificate (so Nginx can start before certbot)
+    cert_dir = output_dir / "nginx" / "self-signed"
+    cert_path = cert_dir / "fullchain.pem"
+    if not cert_path.exists():
+        logger.info("Generating self-signed bootstrap certificate...")
+        _generate_self_signed_cert(config.domain, cert_dir)
+    else:
+        logger.info("Self-signed certificate already exists — skipping.")
 
     # 6. Xray config
     logger.info("Generating xray/config.json...")
@@ -318,11 +422,8 @@ def _generate_certbot_renew(
     tuple[str, str, str]
         A 3-tuple of (script_content, service_unit, timer_unit).
     """
-    from jinja2 import Environment, FileSystemLoader, select_autoescape
-
-    templates_dir = Path(__file__).parent / "templates"
     env = Environment(
-        loader=FileSystemLoader(str(templates_dir)),
+        loader=FileSystemLoader(str(_TEMPLATES_DIR)),
         autoescape=select_autoescape([]),
         keep_trailing_newline=True,
         trim_blocks=True,
@@ -335,6 +436,7 @@ def _generate_certbot_renew(
     script_template = env.get_template("certbot-renew.sh.j2")
     script = script_template.render(
         compose_dir=compose_dir,
+        domain=config.domain,
     )
 
     service_template = env.get_template("certbot-renew.service.j2")
