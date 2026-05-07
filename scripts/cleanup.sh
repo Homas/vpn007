@@ -192,11 +192,6 @@ fi
 # Prune any orphaned networks
 docker network prune -f 2>/dev/null || true
 
-# Restart Docker daemon to clear stale state
-info "Restarting Docker daemon..."
-systemctl restart docker 2>/dev/null || service docker restart 2>/dev/null || \
-    warn "Could not restart Docker daemon."
-
 info "Docker containers and networks removed."
 echo ""
 
@@ -216,19 +211,28 @@ IMAGES=(
 )
 
 for image in "${IMAGES[@]}"; do
-    if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^${image}"; then
+    if docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -q "^${image}" 2>/dev/null; then
         info "  Removing image: $image"
-        docker rmi "$image" 2>/dev/null || true
+        docker rmi "$image" 2>/dev/null || warn "  Could not remove $image (may have dependents)"
     fi
 done
 
 # Remove any locally-built vpn007 images
-docker images --format '{{.Repository}}:{{.Tag}}' | grep -i "vpn007" | while read -r img; do
-    info "  Removing image: $img"
-    docker rmi "$img" 2>/dev/null || true
-done
+vpn007_images=$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -i "vpn007" || true)
+if [[ -n "$vpn007_images" ]]; then
+    while IFS= read -r img; do
+        info "  Removing image: $img"
+        docker rmi "$img" 2>/dev/null || warn "  Could not remove $img"
+    done <<< "$vpn007_images"
+fi
 
 info "Docker images cleaned up."
+echo ""
+
+# Restart Docker daemon to clear stale state
+info "Restarting Docker daemon..."
+systemctl restart docker 2>/dev/null || service docker restart 2>/dev/null || \
+    warn "Could not restart Docker daemon."
 echo ""
 
 # ---------------------------------------------------------------------------
