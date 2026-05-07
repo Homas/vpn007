@@ -6,6 +6,14 @@
 {# NOTE: load_module is in the main nginx.conf; this file is included from there. #}
 
 stream {
+    # Logging for stream connections (L4 level)
+    log_format stream_log '$remote_addr [$time_local] '
+                          'SNI="$ssl_preread_server_name" '
+                          'backend="$backend" '
+                          'status=$status bytes_sent=$bytes_sent bytes_received=$bytes_received '
+                          'session_time=$session_time';
+    access_log /var/log/nginx/stream_access.log stream_log;
+
     # Map SNI hostname to backend: Reality SNI → Xray, default → Nginx HTTP
     map $ssl_preread_server_name $backend {
         {{ reality_sni }}   xray_backend;

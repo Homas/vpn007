@@ -332,7 +332,17 @@ def generate_all(config: DeployConfig) -> dict[str, str]:
     import uuid as _uuid_mod
     from vpn007.crypto import generate_reality_keypair as _gen_reality_keys
 
-    initial_client_uuid = str(_uuid_mod.uuid4())
+    # If client config already exists, reuse its UUID for consistency
+    xray_client_path = output_dir / "clients" / f"xray-{config.xray_initial_client}.txt"
+    if xray_client_path.exists():
+        existing_link = xray_client_path.read_text().strip()
+        if existing_link.startswith("vless://"):
+            initial_client_uuid = existing_link.split("@")[0].removeprefix("vless://")
+            logger.info("Reusing existing client UUID: %s", initial_client_uuid)
+        else:
+            initial_client_uuid = str(_uuid_mod.uuid4())
+    else:
+        initial_client_uuid = str(_uuid_mod.uuid4())
 
     # Generate Reality keys once and reuse for both xray config and client config
     if config.reality_keys is None:
@@ -412,24 +422,17 @@ def generate_all(config: DeployConfig) -> dict[str, str]:
         files[rel_path] = doc_content
         _write_file(output_dir / "docs" / doc_name, doc_content)
 
-    # 13. Xray client provisioning (skip if already exists — preserves keys on re-deploy)
-    xray_client_path = output_dir / "clients" / f"xray-{config.xray_initial_client}.txt"
-    if xray_client_path.exists():
-        logger.info(
-            "Xray client config already exists at %s — skipping (preserving keys).",
-            xray_client_path,
-        )
-    else:
-        logger.info("Provisioning initial Xray client...")
-        xray_client = provision_xray_client(
-            config,
-            client_name=config.xray_initial_client,
-            client_uuid=initial_client_uuid,
-        )
-        client_filename = f"xray-{xray_client.client_name}.txt"
-        client_content = xray_client.vless_share_link + "\n"
-        files[f"clients/{client_filename}"] = client_content
-        _write_file(xray_client_path, client_content)
+    # 13. Xray client provisioning (always regenerated to reflect current SNI/keys)
+    logger.info("Provisioning initial Xray client...")
+    xray_client = provision_xray_client(
+        config,
+        client_name=config.xray_initial_client,
+        client_uuid=initial_client_uuid,
+    )
+    client_filename = f"xray-{xray_client.client_name}.txt"
+    client_content = xray_client.vless_share_link + "\n"
+    files[f"clients/{client_filename}"] = client_content
+    _write_file(xray_client_path, client_content)
 
     # 14. AmneziaWG peer provisioning (skip if already exists — preserves keys on re-deploy)
     awg_peer_path = output_dir / "clients" / f"awg-{config.awg_initial_peer}.conf"
