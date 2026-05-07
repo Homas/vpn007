@@ -4,7 +4,7 @@
 services:
   # --- Layer 4/7 Reverse Proxy (Nginx with stream module) ---
   reverse_proxy:
-    image: nginx:mainline-alpine
+    image: nginx:mainline
     container_name: vpn007_reverse_proxy
     restart: unless-stopped
     ports:
