@@ -251,6 +251,11 @@ def main(argv: list[str] | None = None) -> int:
     # 6d-3. Provision VLESS+Reality inbound in 3x-ui via API
     _provision_xray_inbound(config)
 
+    # 6d-4. Patch AmneziaWG config with I1-I5 CPS signature params
+    # wg-easy generates wg0.conf at first startup but doesn't support I params
+    # via env vars — they must be injected into the config file post-creation.
+    _patch_awg_i_params(config, compose_path)
+
     # 6e. Apply firewall rules (before certbot — certbot needs to punch a hole)
     logger.info("Applying firewall rules...")
     nftables_path = config.output_dir / "nftables.conf"
@@ -797,6 +802,100 @@ def _provision_xray_inbound(config: DeployConfig) -> None:
                 )
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
         logger.warning("Failed to create 3x-ui inbound: %s", exc)
+
+
+def _patch_awg_i_params(config: DeployConfig, compose_path: Path) -> None:
+    """Inject I1-I5 CPS signature params into the AmneziaWG config.
+
+    wg-easy generates ``wg0.conf`` at first startup from env vars but does
+    NOT support I1-I5 via environment variables (per wg-easy docs: "All
+    parameters except I1-I5 will be set at first startup"). This function
+    patches the generated config to add the I params after the last H param.
+
+    If I params are already present in the config, this is a no-op.
+    If no AWG obfuscation is configured, this is a no-op.
+    """
+    awg = config.awg_obfuscation
+    if awg is None:
+        return
+
+    # Collect non-empty I params
+    i_params: list[tuple[str, str]] = []
+    for name, value in [("I1", awg.i1), ("I2", awg.i2), ("I3", awg.i3),
+                        ("I4", awg.i4), ("I5", awg.i5)]:
+        if value:
+            i_params.append((name, value))
+
+    if not i_params:
+        return
+
+    wg_conf_path = config.output_dir / "data" / "amneziawg" / "wg0.conf"
+
+    # Wait for wg-easy to generate the config (it does this at first startup)
+    import time
+    for _ in range(15):
+        if wg_conf_path.exists() and wg_conf_path.stat().st_size > 100:
+            break
+        time.sleep(2)
+    else:
+        logger.warning(
+            "AmneziaWG config not found at %s after 30s — "
+            "skipping I-param injection.",
+            wg_conf_path,
+        )
+        return
+
+    content = wg_conf_path.read_text(encoding="utf-8")
+
+    # Check if I params are already present
+    if "I1 = " in content:
+        logger.info("AmneziaWG I params already present in config — skipping.")
+        return
+
+    # Find insertion point: after the last H4 line
+    lines = content.splitlines()
+    insert_idx = None
+    for idx, line in enumerate(lines):
+        if line.startswith("H4 = "):
+            insert_idx = idx + 1
+            break
+
+    if insert_idx is None:
+        # Fallback: insert after S2 line (for configs without H params)
+        for idx, line in enumerate(lines):
+            if line.startswith("S2 = ") or line.startswith("S4 = "):
+                insert_idx = idx + 1
+        if insert_idx is None:
+            logger.warning(
+                "Could not find insertion point in wg0.conf — "
+                "skipping I-param injection."
+            )
+            return
+
+    # Insert I params
+    i_lines = [f"{name} = {value}" for name, value in i_params]
+    for i, i_line in enumerate(i_lines):
+        lines.insert(insert_idx + i, i_line)
+
+    wg_conf_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    logger.info("Injected AmneziaWG I params: %s", ", ".join(n for n, _ in i_params))
+
+    # Restart amneziawg to pick up the new config
+    try:
+        subprocess.run(
+            [
+                "docker", "compose", "-f", str(compose_path),
+                "--project-name", "vpn007",
+                "restart", "amneziawg",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        )
+        logger.info("AmneziaWG container restarted with I params.")
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        logger.warning("Failed to restart amneziawg after I-param injection: %s", exc)
 
 
 def _copy_letsencrypt_cert_to_nginx(config: DeployConfig) -> None:
