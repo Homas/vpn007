@@ -805,104 +805,172 @@ def _provision_xray_inbound(config: DeployConfig) -> None:
 
 
 def _patch_awg_i_params(config: DeployConfig, compose_path: Path) -> None:
-    """Inject I1-I5 CPS signature params into the AmneziaWG config.
+    """Set I1-I5 CPS signature params and provision default client in wg-easy DB.
 
-    wg-easy generates ``wg0.conf`` at first startup from env vars but does
-    NOT support I1-I5 via environment variables (per wg-easy docs: "All
+    wg-easy does not support I1-I5 via environment variables (per docs: "All
     parameters except I1-I5 will be set at first startup"). This function
-    patches the generated config to add the I params after the last H param.
+    writes them directly to the wg-easy SQLite database (interfaces_table,
+    user_configs_table) and restarts the container so it regenerates wg0.conf
+    from the DB with I params included.
 
-    If I params are already present in the config, this is a no-op.
+    Also provisions the default AWG peer as a client in the DB if not already
+    present, so it appears in the wg-easy web UI.
     """
-    from vpn007.crypto import generate_awg_obfuscation
+    import sqlite3 as sqlite3_mod
+    import time
+
+    from vpn007.crypto import generate_awg_obfuscation, generate_wg_keypair
 
     # Resolve I params: use explicit config, or fall back to defaults
     awg = config.awg_obfuscation
     if awg is None:
         awg = generate_awg_obfuscation()
 
-    # Collect non-empty I params
-    i_params: list[tuple[str, str]] = []
-    for name, value in [("I1", awg.i1), ("I2", awg.i2), ("I3", awg.i3),
-                        ("I4", awg.i4), ("I5", awg.i5)]:
-        if value:
-            i_params.append((name, value))
+    i1 = awg.i1 or ""
+    i2 = awg.i2 or ""
+    i3 = awg.i3 or ""
+    i4 = awg.i4 or ""
+    i5 = awg.i5 or ""
 
-    if not i_params:
-        logger.info("No AWG I params to inject (all empty).")
+    if not any([i1, i2, i3]):
+        logger.info("No AWG I params to set (all empty).")
         return
 
-    wg_conf_path = config.output_dir / "data" / "amneziawg" / "wg0.conf"
+    db_path = config.output_dir / "data" / "amneziawg" / "wg-easy.db"
 
-    # Wait for wg-easy to generate the config (it does this at first startup)
-    import time
-    logger.info("Waiting for wg-easy to generate wg0.conf...")
-    for attempt in range(15):
-        if wg_conf_path.exists() and wg_conf_path.stat().st_size > 100:
-            logger.debug("wg0.conf found (attempt %d, size %d bytes)",
-                         attempt + 1, wg_conf_path.stat().st_size)
+    # Wait for wg-easy to create the database on first startup
+    logger.info("Waiting for wg-easy database...")
+    for attempt in range(20):
+        if db_path.exists() and db_path.stat().st_size > 1000:
             break
         time.sleep(2)
     else:
         logger.warning(
-            "AmneziaWG config not found at %s after 30s — "
-            "skipping I-param injection.",
-            wg_conf_path,
+            "wg-easy database not found at %s after 40s — "
+            "skipping I-param provisioning.",
+            db_path,
         )
         return
 
-    content = wg_conf_path.read_text(encoding="utf-8")
+    # Stop the container to avoid DB locking conflicts
+    logger.info("Stopping amneziawg container for DB update...")
+    subprocess.run(
+        ["docker", "compose", "-f", str(compose_path),
+         "--project-name", "vpn007", "stop", "amneziawg"],
+        capture_output=True, text=True, timeout=30,
+    )
+    time.sleep(2)
 
-    # Check if I params are already present
-    if "I1 = " in content:
-        logger.info("AmneziaWG I params already present in config — skipping.")
-        return
-
-    # Find insertion point: after the last H4 line
-    lines = content.splitlines()
-    insert_idx = None
-    for idx, line in enumerate(lines):
-        if line.startswith("H4 = "):
-            insert_idx = idx + 1
-            break
-
-    if insert_idx is None:
-        # Fallback: insert after S2 line (for configs without H params)
-        for idx, line in enumerate(lines):
-            if line.startswith("S2 = ") or line.startswith("S4 = "):
-                insert_idx = idx + 1
-        if insert_idx is None:
-            logger.warning(
-                "Could not find insertion point in wg0.conf (no H4 or S2 line) — "
-                "skipping I-param injection. Config content:\n%s",
-                content[:500],
-            )
-            return
-
-    # Insert I params
-    i_lines = [f"{name} = {value}" for name, value in i_params]
-    for i, i_line in enumerate(i_lines):
-        lines.insert(insert_idx + i, i_line)
-
-    wg_conf_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    logger.info("Injected AmneziaWG I params: %s", ", ".join(n for n, _ in i_params))
-
-    # Restart amneziawg to pick up the new config
     try:
-        subprocess.run(
-            [
-                "docker", "compose", "-f", str(compose_path),
-                "--project-name", "vpn007",
-                "restart", "amneziawg",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=True,
+        conn = sqlite3_mod.connect(str(db_path))
+        cursor = conn.cursor()
+
+        # Update I params on the interface
+        cursor.execute(
+            "UPDATE interfaces_table SET i1=?, i2=?, i3=?, i4=?, i5=? WHERE name='wg0'",
+            (i1, i2, i3, i4, i5),
         )
-        logger.info("AmneziaWG container restarted with I params.")
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-        logger.warning("Failed to restart amneziawg after I-param injection: %s", exc)
+        if cursor.rowcount > 0:
+            logger.info("Set I params on interfaces_table: I1=%s, I2=%s, I3=%s", i1, i2, i3)
+        else:
+            logger.warning("No 'wg0' row found in interfaces_table.")
+
+        # Update default I params for new clients
+        cursor.execute(
+            "UPDATE user_configs_table SET default_i1=?, default_i2=?, default_i3=?, default_i4=?, default_i5=?",
+            (i1, i2, i3, i4, i5),
+        )
+        logger.info("Set default I params on user_configs_table.")
+
+        # Provision default client if not already present
+        peer_name = config.awg_initial_peer or "default-peer"
+        cursor.execute(
+            "SELECT id FROM clients_table WHERE name=?", (peer_name,)
+        )
+        if cursor.fetchone() is None:
+            # Generate keys for the peer
+            private_key, public_key = generate_wg_keypair()
+            import secrets as _secrets
+            psk = _secrets.token_bytes(32)
+            import base64 as _b64
+            psk_b64 = _b64.b64encode(psk).decode()
+
+            # Find next available IPv4/IPv6 addresses
+            cursor.execute("SELECT ipv4_address FROM clients_table ORDER BY id DESC LIMIT 1")
+            last_row = cursor.fetchone()
+            if last_row and last_row[0]:
+                # Increment last octet
+                parts = last_row[0].split(".")
+                next_ip = f"{parts[0]}.{parts[1]}.{parts[2]}.{int(parts[3]) + 1}"
+            else:
+                next_ip = "10.8.0.2"
+
+            # IPv6: increment last hex digit
+            cursor.execute("SELECT ipv6_address FROM clients_table ORDER BY id DESC LIMIT 1")
+            last_v6 = cursor.fetchone()
+            if last_v6 and last_v6[0]:
+                v6_parts = last_v6[0].rsplit(":", 1)
+                next_v6 = f"{v6_parts[0]}:{int(v6_parts[1], 16) + 1:x}"
+            else:
+                next_v6 = "fdcc:ad94:bacf:61a4::cafe:2"
+
+            # Get user_id (first user)
+            cursor.execute("SELECT id FROM users_table LIMIT 1")
+            user_row = cursor.fetchone()
+            user_id = user_row[0] if user_row else 1
+
+            # Get server endpoint
+            server_endpoint = f"{config.domain}:{config.awg_listen_port or 51820}"
+
+            cursor.execute(
+                """INSERT INTO clients_table
+                (user_id, interface_id, name, ipv4_address, ipv6_address,
+                 pre_up, post_up, pre_down, post_down,
+                 private_key, public_key, pre_shared_key,
+                 allowed_ips, server_allowed_ips, persistent_keepalive,
+                 mtu, dns, server_endpoint, enabled,
+                 j_c, j_min, j_max, i1, i2, i3, i4, i5)
+                VALUES (?, 'wg0', ?, ?, ?,
+                        '', '', '', '',
+                        ?, ?, ?,
+                        NULL, '[]', 0,
+                        1420, '1.1.1.1', ?, 1,
+                        ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (user_id, peer_name, next_ip, next_v6,
+                 private_key, public_key, psk_b64,
+                 server_endpoint,
+                 awg.jc, awg.jmin, awg.jmax,
+                 i1, i2, i3, i4, i5),
+            )
+            logger.info("Provisioned default AWG peer '%s' in wg-easy DB (IP: %s)", peer_name, next_ip)
+        else:
+            logger.info("AWG peer '%s' already exists in DB — skipping.", peer_name)
+
+        conn.commit()
+        conn.close()
+
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to update wg-easy database: %s", exc)
+
+    # Start the container — it will regenerate wg0.conf from DB with I params
+    logger.info("Starting amneziawg container...")
+    subprocess.run(
+        ["docker", "compose", "-f", str(compose_path),
+         "--project-name", "vpn007", "start", "amneziawg"],
+        capture_output=True, text=True, timeout=60,
+    )
+
+    # Verify
+    time.sleep(3)
+    wg_conf_path = config.output_dir / "data" / "amneziawg" / "wg0.conf"
+    if wg_conf_path.exists():
+        content = wg_conf_path.read_text()
+        if "I1 = " in content:
+            logger.info("Verified: I params present in wg0.conf after restart.")
+        else:
+            logger.warning("I params NOT found in wg0.conf after restart — check wg-easy logs.")
+    else:
+        logger.warning("wg0.conf not found after restart.")
 
 
 def _copy_letsencrypt_cert_to_nginx(config: DeployConfig) -> None:
