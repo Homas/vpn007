@@ -872,11 +872,18 @@ def _patch_awg_i_params(config: DeployConfig, compose_path: Path) -> None:
         cursor = conn.cursor()
 
         cursor.execute(
-            "UPDATE interfaces_table SET i1=?, i2=?, i3=?, i4=?, i5=? WHERE name='wg0'",
-            (i1, i2, i3, i4, i5),
+            """UPDATE interfaces_table SET
+                i1=?, i2=?, i3=?, i4=?, i5=?,
+                s1=?, s2=?, s3=?, s4=?,
+                h1=?, h2=?, h3=?, h4=?
+            WHERE name='wg0'""",
+            (i1, i2, i3, i4, i5,
+             awg.s1, awg.s2, awg.s3, awg.s4,
+             awg.h1, awg.h2, awg.h3, awg.h4),
         )
         if cursor.rowcount > 0:
-            logger.info("Set I params on interfaces_table: I1=%s, I2=%s, I3=%s", i1, i2, i3)
+            logger.info("Set AWG params on interfaces_table: H1=%s, H2=%s, S3=%s, S4=%s, I1=%s",
+                        awg.h1, awg.h2, awg.s3, awg.s4, i1)
         else:
             logger.warning("No 'wg0' row found in interfaces_table.")
 
