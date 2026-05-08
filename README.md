@@ -36,6 +36,8 @@ The tool also provisions an nftables firewall with AS/subnet blocking, sets up s
   - [Step 4: Verify the tunnel](#step-4-verify-the-tunnel)
   - [Reverse-initiated connections](#reverse-initiated-connections)
   - [Dual-role: VM as both VPN node and exit node](#dual-role-vm-as-both-vpn-node-and-exit-node)
+  - [Disabling forwarding to an exit node](#disabling-forwarding-to-an-exit-node)
+  - [Disabling the exit-node role on this VM](#disabling-the-exit-node-role-on-this-vm)
 - [Backup and restore](#backup-and-restore)
 - [Upgrading](#upgrading)
 - [IPv6 support](#ipv6-support)
@@ -750,8 +752,6 @@ For environments where IP restriction is not feasible, consider placing the pane
 
 ### Admin credentials
 
-During deployment, VPN007 generates random credentials for both web panels:
-
 **3x-ui panel:**
 - **Username**: `admin` (default — change on first login)
 - **Password**: `admin` (default — change on first login)
@@ -955,10 +955,12 @@ Keys are auto-generated and embedded in the forwarding script. Traffic is forwar
 
 Uses `autossh` for persistent SSH tunnels with automatic reconnection. The deployer generates SSH key pairs and configures port forwarding over the SSH connection. No additional software needed on VM-B beyond an SSH server.
 
+The tunnel connects as a dedicated unprivileged user (`vpn007-tunnel`) on the remote side. This user has `/usr/sbin/nologin` as its shell and cannot execute commands — it only holds the SSH connection open for port forwarding. The `forwarding-install.py` script creates this user automatically on the receiving VM during setup.
+
 ```bash
 # The forwarding script sets up something like:
 autossh -M 20000 -N -L 0.0.0.0:443:localhost:443 \
-        -i /root/.ssh/vpn007_tunnel_key root@VM-A
+        -i /root/.ssh/vpn007_tunnel_key vpn007-tunnel@VM-A
 ```
 
 #### Tailscale tunnel
@@ -1299,7 +1301,7 @@ After deploying both VMs:
 **SSH:**
 
 2. Run the setup script: `chmod +x exit-node/setup-exit-node.sh && sudo ./exit-node/setup-exit-node.sh`
-3. Install the public key (`exit-node/exit-node-ssh-public.key`) in `/root/.ssh/authorized_keys` on the peer VM
+3. Create the `vpn007-tunnel` user on the peer VM and install the public key (`exit-node/exit-node-ssh-public.key`) in `/home/vpn007-tunnel/.ssh/authorized_keys`
 4. The systemd service (`vpn007-exit-node-ssh`) handles autossh with automatic reconnection
 
 **Tailscale:**
@@ -1309,6 +1311,143 @@ After deploying both VMs:
 4. The systemd service (`vpn007-exit-node-tailscale`) loads nftables rules on boot
 
 See `deploy/exit-node/README.md` for detailed instructions generated for your specific configuration.
+
+#### Disabling forwarding to an exit node
+
+To stop forwarding traffic from this VM to a remote exit node (VM-B) and route traffic directly to the internet from this VM instead:
+
+**1. Update `.env`:**
+
+```bash
+FORWARDING_ENABLED=false
+# Comment out or remove:
+# TUNNEL_TYPE=
+# SECONDARY_VM_IP=
+# FORWARDING_PORTS=
+```
+
+**2. Re-deploy to regenerate configs without forwarding rules:**
+
+```bash
+sudo vpn007
+# or dry-run + manual apply:
+vpn007 --dry-run
+nft -f deploy/nftables.conf
+docker compose up -d
+```
+
+**3. Remove the tunnel interface on this VM:**
+
+```bash
+# WireGuard tunnel
+wg-quick down wg-tunnel
+systemctl disable wg-quick@wg-tunnel
+rm -f /etc/wireguard/wg-tunnel.conf
+
+# SSH tunnel
+systemctl disable --now autossh-tunnel
+rm -f /etc/systemd/system/autossh-tunnel.service
+systemctl daemon-reload
+
+# Tailscale — no interface to remove; just stop advertising routes if needed
+```
+
+**4. Verify traffic now exits from this VM's own IP:**
+
+```bash
+# From a connected VPN client
+curl -4 ifconfig.me   # Should show this VM's public IP, not VM-B's
+```
+
+**5. (Optional) Clean up VM-B:**
+
+If VM-B is no longer needed as an exit node for anyone:
+
+```bash
+# On VM-B
+wg-quick down wg-tunnel           # WireGuard
+systemctl disable --now vpn007-exit-node-ssh   # SSH
+nft delete table ip vpn007_forward
+sysctl -w net.ipv4.ip_forward=0
+userdel -r vpn007-tunnel 2>/dev/null   # Remove the tunnel user if SSH was used
+```
+
+#### Disabling the exit-node role on this VM
+
+To stop this VM from accepting forwarded traffic from another VPN007 instance (stop serving as an exit node for a peer):
+
+**1. Update `.env`:**
+
+```bash
+EXIT_NODE_ENABLED=false
+# Comment out or remove:
+# EXIT_NODE_TUNNEL_TYPE=
+# EXIT_NODE_PEER_IP=
+# EXIT_NODE_TUNNEL_SUBNET=
+# EXIT_NODE_LISTEN_PORT=
+```
+
+**2. Tear down the exit-node tunnel:**
+
+```bash
+# WireGuard
+wg-quick down wg-exit-node
+systemctl disable wg-quick@wg-exit-node
+rm -f /etc/wireguard/wg-exit-node.conf
+
+# SSH
+systemctl disable --now vpn007-exit-node-ssh
+rm -f /etc/systemd/system/vpn007-exit-node-ssh.service
+rm -f /root/.ssh/vpn007_exit_node_key
+systemctl daemon-reload
+
+# Tailscale
+systemctl disable --now vpn007-exit-node-tailscale
+rm -f /etc/systemd/system/vpn007-exit-node-tailscale.service
+systemctl daemon-reload
+```
+
+**3. Remove the exit-node nftables table:**
+
+```bash
+nft delete table ip vpn007_exit_node
+```
+
+**4. (Optional) Remove the tunnel user if SSH was used:**
+
+```bash
+userdel -r vpn007-tunnel
+```
+
+**5. Re-deploy to regenerate configs without exit-node files:**
+
+```bash
+sudo vpn007
+# or:
+vpn007 --dry-run
+```
+
+The `deploy/exit-node/` directory will no longer be generated.
+
+**6. Verify:**
+
+```bash
+# No exit-node tunnel interface
+wg show                          # Should not list wg-exit-node
+ip link show wg-exit-node 2>&1   # Should say "does not exist"
+
+# No exit-node nftables table
+nft list tables | grep vpn007_exit_node   # Should be empty
+
+# No exit-node systemd services
+systemctl list-units 'vpn007-exit*'       # Should be empty
+
+# Main VPN stack still works
+docker compose ps                         # All containers Up
+curl -sk https://your.domain/             # Cover site responds
+```
+
+**Note:** Disabling the exit-node role does NOT affect the main VPN007 stack on this VM. Your own VPN clients, cover website, firewall, and management panels continue to work unchanged.
 
 ## Backup and restore
 

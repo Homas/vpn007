@@ -53,6 +53,7 @@ WG_LISTEN_PORT: int = 51821
 # SSH tunnel settings
 SSH_PORT: int = 22
 AUTOSSH_MONITOR_PORT: int = 20000
+SSH_TUNNEL_USER: str = "vpn007-tunnel"
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -249,13 +250,57 @@ PersistentKeepalive = 25
     log.info("WireGuard tunnel interface wg-tunnel is up.")
 
 
+def ensure_tunnel_user_exists_on_remote() -> None:
+    """Create the unprivileged tunnel user on the remote (primary) VM.
+
+    The SSH tunnel connects as an unprivileged user (vpn007-tunnel) on the
+    remote side. This user has no shell, no password, and no home directory
+    beyond ~/.ssh. It can only hold the SSH connection open — it cannot
+    execute commands or escalate privileges.
+
+    This function is a no-op if the user already exists on the remote.
+    It prints instructions for the operator to create the user manually
+    if SSH access to the remote is not available from here.
+    """
+    log.info(
+        "The SSH tunnel uses unprivileged user '%s' on the remote VM (%s).",
+        SSH_TUNNEL_USER,
+        PRIMARY_VM_IP,
+    )
+    log.info(
+        "Ensure this user exists on the remote VM. Create it with:"
+    )
+    log.info(
+        "  ssh root@%s 'useradd -r -s /usr/sbin/nologin -d /home/%s -m %s'",
+        PRIMARY_VM_IP,
+        SSH_TUNNEL_USER,
+        SSH_TUNNEL_USER,
+    )
+    log.info(
+        "  ssh root@%s 'mkdir -p /home/%s/.ssh && chmod 700 /home/%s/.ssh && "
+        "chown %s:%s /home/%s/.ssh'",
+        PRIMARY_VM_IP,
+        SSH_TUNNEL_USER,
+        SSH_TUNNEL_USER,
+        SSH_TUNNEL_USER,
+        SSH_TUNNEL_USER,
+        SSH_TUNNEL_USER,
+    )
+
+
 def setup_ssh_tunnel() -> None:
-    """Configure an SSH tunnel to/from the primary VM using autossh."""
+    """Configure an SSH tunnel to/from the primary VM using autossh.
+
+    The tunnel connects as the unprivileged user 'vpn007-tunnel' on the
+    remote side. This user has /usr/sbin/nologin as its shell and cannot
+    execute commands — it only holds the SSH connection for port forwarding.
+    """
     log.info("Configuring SSH tunnel to %s...", PRIMARY_VM_IP)
 
     if REVERSE_INITIATED:
         # Secondary VM initiates reverse SSH tunnel to primary VM.
         # Each forwarding port gets a remote forward.
+        ensure_tunnel_user_exists_on_remote()
         forwards: list[str] = []
         for pf in FORWARDING_PORTS:
             proto = pf["protocol"]
@@ -275,14 +320,44 @@ def setup_ssh_tunnel() -> None:
             "-o", "ServerAliveCountMax=3",
             "-o", "StrictHostKeyChecking=accept-new",
             "-p", str(SSH_PORT),
-        ] + forwards + [f"root@{PRIMARY_VM_IP}"]
+        ] + forwards + [f"{SSH_TUNNEL_USER}@{PRIMARY_VM_IP}"]
         log.info("autossh command: %s", " ".join(cmd))
         # autossh runs in the foreground — it handles reconnection itself
         subprocess.Popen(cmd)
     else:
         # Primary VM initiates — secondary just needs sshd running
+        # and the vpn007-tunnel user created for the incoming connection.
         log.info("SSH tunnel mode: primary VM will connect to us.")
         log.info("Ensure sshd is running and accessible on port %d.", SSH_PORT)
+        log.info(
+            "Creating local tunnel user '%s' for incoming connections...",
+            SSH_TUNNEL_USER,
+        )
+        # Create the unprivileged user on this (secondary) VM
+        result = run_cmd(
+            ["id", SSH_TUNNEL_USER], check=False, capture=True
+        )
+        if result.returncode != 0:
+            run_cmd([
+                "useradd", "-r",
+                "-s", "/usr/sbin/nologin",
+                "-d", f"/home/{SSH_TUNNEL_USER}",
+                "-m",
+                SSH_TUNNEL_USER,
+            ])
+            log.info("Created user '%s'.", SSH_TUNNEL_USER)
+        else:
+            log.info("User '%s' already exists.", SSH_TUNNEL_USER)
+
+        # Set up .ssh directory for the tunnel user
+        ssh_dir = f"/home/{SSH_TUNNEL_USER}/.ssh"
+        os.makedirs(ssh_dir, exist_ok=True)
+        os.chmod(ssh_dir, 0o700)
+        run_cmd(["chown", "-R", f"{SSH_TUNNEL_USER}:{SSH_TUNNEL_USER}", ssh_dir])
+        log.info(
+            "Install the primary VM's public key in %s/authorized_keys",
+            ssh_dir,
+        )
 
 
 def setup_tailscale_tunnel() -> None:

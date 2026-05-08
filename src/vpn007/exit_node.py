@@ -155,6 +155,7 @@ def generate_exit_node_ssh_config(config: DeployConfig) -> tuple[str, str, str, 
     local_ip, peer_ip = _subnet_to_ips(config.exit_node_tunnel_subnet)
     private_key_pem, public_key_openssh = generate_ssh_keypair()
 
+    ssh_tunnel_user = "vpn007-tunnel"
     ssh_key_path = "/root/.ssh/vpn007_exit_node_key"
     autossh_monitor_port = 20100  # Different from forwarding tunnel (20000)
 
@@ -201,7 +202,7 @@ ExecStart=/usr/bin/autossh -M {autossh_monitor_port} -N \\
     -o "ExitOnForwardFailure=yes" \\
     -i {ssh_key_path} \\
     -w 0:0 \\
-    root@{config.exit_node_peer_ip}
+    {ssh_tunnel_user}@{config.exit_node_peer_ip}
 ExecStop=/usr/sbin/nft delete table ip vpn007_exit_node
 Restart=always
 RestartSec=5
@@ -262,7 +263,12 @@ echo "[+] Public key to install on peer VM ({config.exit_node_peer_ip}):"
 echo ""
 echo "    {public_key_openssh}"
 echo ""
-echo "    Add this to /root/.ssh/authorized_keys on the peer VM."
+echo "    Create the tunnel user and install the key on the peer VM:"
+echo ""
+echo "    ssh root@{config.exit_node_peer_ip} 'useradd -r -s /usr/sbin/nologin -d /home/{ssh_tunnel_user} -m {ssh_tunnel_user}'"
+echo "    ssh root@{config.exit_node_peer_ip} 'mkdir -p /home/{ssh_tunnel_user}/.ssh && chmod 700 /home/{ssh_tunnel_user}/.ssh'"
+echo "    ssh root@{config.exit_node_peer_ip} 'echo \\"{public_key_openssh}\\" >> /home/{ssh_tunnel_user}/.ssh/authorized_keys'"
+echo "    ssh root@{config.exit_node_peer_ip} 'chmod 600 /home/{ssh_tunnel_user}/.ssh/authorized_keys && chown -R {ssh_tunnel_user}:{ssh_tunnel_user} /home/{ssh_tunnel_user}/.ssh'"
 echo ""
 echo "[+] Verify with: systemctl status vpn007-exit-node-ssh"
 """
@@ -520,10 +526,21 @@ cp exit-node/exit-node-ssh-private.key /root/.ssh/vpn007_exit_node_key
 chmod 600 /root/.ssh/vpn007_exit_node_key
 ```
 
-#### 3. Install the public key on the peer VM
+#### 3. Create the tunnel user on the peer VM and install the public key
 
-Copy the contents of `exit-node/exit-node-ssh-public.key` to
-`/root/.ssh/authorized_keys` on the peer VM (`{config.exit_node_peer_ip}`).
+The SSH tunnel connects as an unprivileged user (`vpn007-tunnel`) on the
+peer VM. This user has no shell and cannot execute commands — it only holds
+the SSH connection open for port forwarding.
+
+```bash
+# On the peer VM ({config.exit_node_peer_ip}):
+useradd -r -s /usr/sbin/nologin -d /home/vpn007-tunnel -m vpn007-tunnel
+mkdir -p /home/vpn007-tunnel/.ssh
+chmod 700 /home/vpn007-tunnel/.ssh
+cat exit-node/exit-node-ssh-public.key >> /home/vpn007-tunnel/.ssh/authorized_keys
+chmod 600 /home/vpn007-tunnel/.ssh/authorized_keys
+chown -R vpn007-tunnel:vpn007-tunnel /home/vpn007-tunnel/.ssh
+```
 
 #### 4. Install the systemd service
 
@@ -554,15 +571,20 @@ systemctl status vpn007-exit-node-ssh
 # Check nftables exit-node table
 nft list table ip vpn007_exit_node
 
-# Check SSH tunnel connectivity
-ssh -i /root/.ssh/vpn007_exit_node_key root@{config.exit_node_peer_ip} "echo ok"
+# Check SSH tunnel connectivity (from this VM to the peer)
+ssh -i /root/.ssh/vpn007_exit_node_key vpn007-tunnel@{config.exit_node_peer_ip} "echo ok"
+# Note: this will fail with "This account is currently not available" which is
+# expected — the nologin shell rejects interactive sessions. The tunnel uses
+# -N (no command) so it works despite the restricted shell.
 ```
 
 ## Security notes
 
-- The private key (`exit-node-ssh-private.key`) grants root SSH access to the
-  peer VM. Handle with the same care as any root SSH key.
-- Delete the private key file from the deploy directory after installation:
+- The tunnel connects as `vpn007-tunnel` — an unprivileged user with no shell
+  (`/usr/sbin/nologin`). Even if the key is compromised, the attacker cannot
+  execute commands or escalate privileges on the peer VM.
+- The private key (`exit-node-ssh-private.key`) is stored locally on this VM.
+  Delete it from the deploy directory after installation:
   `rm exit-node/exit-node-ssh-private.key`
 - The systemd service uses `StrictHostKeyChecking=accept-new` — on first
   connection it accepts the peer's host key. Subsequent connections verify it.
