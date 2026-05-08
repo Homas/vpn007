@@ -169,10 +169,19 @@ def _generate_s_pair() -> tuple[int, int]:
             return sa, sb
 
 
-def _generate_distinct_h_values() -> tuple[int, int, int, int]:
-    """Generate four distinct H values in [5, 2147483647]."""
-    values: set[int] = set()
-    while len(values) < 4:
-        values.add(random.randint(5, 2147483647))
-    h1, h2, h3, h4 = values
-    return h1, h2, h3, h4
+def _generate_distinct_h_values() -> tuple[str, str, str, str]:
+    """Generate four non-overlapping H ranges in [5, 2147483647].
+
+    AmneziaWG 2.0 uses H1-H4 as ranges (min-max) instead of fixed values.
+    Each range spans ~500M values and they must not overlap.
+    """
+    # Divide the space [5, 2147483647] into 4 non-overlapping bands
+    # with random start points within each band
+    band_size = 2147483647 // 5  # ~429M per band, leaving gaps
+    ranges: list[str] = []
+    for i in range(4):
+        band_start = 5 + i * band_size + random.randint(0, band_size // 4)
+        band_end = band_start + random.randint(band_size // 4, band_size // 2)
+        band_end = min(band_end, 2147483647)
+        ranges.append(f"{band_start}-{band_end}")
+    return ranges[0], ranges[1], ranges[2], ranges[3]

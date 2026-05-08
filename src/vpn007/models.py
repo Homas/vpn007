@@ -31,10 +31,12 @@ class AwgObfuscation:
     s2: int  # Random prefix for Response packets (0-1188, recommended 15-150)
     s3: int  # Random prefix for Cookie packets (0-1216, recommended 15-150)
     s4: int  # Random prefix for Data packets (0-32)
-    h1: int  # Dynamic header for Init packets (5-2147483647)
-    h2: int  # Dynamic header for Response packets (5-2147483647)
-    h3: int  # Dynamic header for Cookie packets (5-2147483647)
-    h4: int  # Dynamic header for Data packets (5-2147483647)
+    # Dynamic headers for packet types (AmneziaWG 2.0: ranges like "min-max")
+    # All H values must be non-overlapping ranges in [5, 2147483647].
+    h1: str  # Dynamic header range for Init packets
+    h2: str  # Dynamic header range for Response packets
+    h3: str  # Dynamic header range for Cookie packets
+    h4: str  # Dynamic header range for Data packets
     # Junk packet parameters (can differ between server and clients)
     jc: int = 4  # Junk packet count (1-128, recommended 4-10)
     jmin: int = 50  # Min junk packet size (0-1280)
