@@ -84,6 +84,7 @@ The tool also provisions an nftables firewall with AS/subnet blocking, sets up s
 | Docker Compose | v2+ (plugin) | Service orchestration |
 | nftables | System package | Firewall |
 | curl | System package | IP detection, health checks |
+| dig (dnsutils) | System package | Hostname resolution for access control |
 | git | System package | Repository management |
 
 ### Python packages
@@ -242,10 +243,10 @@ Obfuscation parameters (env vars only — provide all or none for auto-generatio
 | `AWG_S2` | 0-1188 (rec. 15-150) | Random prefix for Response packets |
 | `AWG_S3` | 0-1216 (rec. 15-150) | Random prefix for Cookie packets |
 | `AWG_S4` | 0-32 | Random prefix for Data packets |
-| `AWG_H1` | 5-2147483647 | Dynamic header for Init packets |
-| `AWG_H2` | 5-2147483647 | Dynamic header for Response packets |
-| `AWG_H3` | 5-2147483647 | Dynamic header for Cookie packets |
-| `AWG_H4` | 5-2147483647 | Dynamic header for Data packets |
+| `AWG_H1` | Range `min-max` in 5-2147483647 | Dynamic header range for Init packets (AmneziaWG 2.0) |
+| `AWG_H2` | Range `min-max` in 5-2147483647 | Dynamic header range for Response packets |
+| `AWG_H3` | Range `min-max` in 5-2147483647 | Dynamic header range for Cookie packets |
+| `AWG_H4` | Range `min-max` in 5-2147483647 | Dynamic header range for Data packets |
 | `AWG_JC` | 1-128 (rec. 4-10) | Junk packet count |
 | `AWG_JMIN` | 0-1280 | Min junk packet size (default: 50) |
 | `AWG_JMAX` | 0-1280 | Max junk packet size (default: 1000) |
@@ -400,7 +401,7 @@ The deployer validates all parameters at startup and exits with a clear error me
 | `AWG_S2` | Integer 0-1188 |
 | `AWG_S3` | Integer 0-1216 |
 | `AWG_S4` | Integer 0-32 |
-| `AWG_H1`-`AWG_H4` | Integer 5-2147483647 |
+| `AWG_H1`-`AWG_H4` | Range format `min-max` (5-2147483647), non-overlapping |
 | `AWG_JC` | Integer 1-128 |
 | `AWG_JMIN`, `AWG_JMAX` | Integer 0-1280; `JMAX` must be > `JMIN` |
 | `AWG_S1`-`H4` group | All eight must be provided together, or all omitted for auto-generation |
@@ -504,7 +505,7 @@ All volume mounts in `docker-compose.yml` use relative paths (`./data/...`), so 
 |-----------|-------|---------|---------|
 | `vpn007_reverse_proxy` | `nginx:mainline-alpine` | bridge (vpn_net) | L4/L7 routing, TLS termination |
 | `vpn007_three_x_ui` | `ghcr.io/mhsanaei/3x-ui:latest` | bridge (vpn_net) | Xray management + VLESS+Reality |
-| `vpn007_amneziawg` | `ghcr.io/wg-easy/wg-easy:15` | host | AmneziaWG 2.0 VPN + web panel |
+| `vpn007_amneziawg` | `ghcr.io/wg-easy/wg-easy:15.3.0-beta.2` | host | AmneziaWG 2.0 VPN + web panel |
 | `vpn007_tailscale` | `tailscale/tailscale:latest` | host | Mesh VPN overlay |
 | `vpn007_cover_site` | `nginx:alpine` | bridge (vpn_net) | Legitimate cover website |
 | `vpn007_certbot` | `certbot/certbot:latest` | *(utility)* | TLS cert acquisition/renewal |
@@ -749,32 +750,30 @@ For environments where IP restriction is not feasible, consider placing the pane
 
 ### Admin credentials
 
-During deployment, VPN007 generates random credentials for the 3x-ui web panel:
-- **Username**: 8-12 random alphanumeric characters
-- **Password**: 16-24 random characters (letters, digits, and symbols)
+During deployment, VPN007 generates random credentials for both web panels:
 
-These credentials are:
-1. Printed to the console during deployment (save them immediately)
-2. Written to the deployment log at `{output_dir}/deploy.log` (file permissions set to `0600`)
-3. Stored in the 3x-ui database at `{output_dir}/data/three_x_ui/x-ui.db`
+**3x-ui panel:**
+- **Username**: `admin` (default — change on first login)
+- **Password**: `admin` (default — change on first login)
+- Retrieve: `docker exec -it vpn007_three_x_ui /app/x-ui setting -show`
 
-The deployment log contains sensitive credentials and is created with `0600` permissions (owner read/write only). If you move or copy the log, preserve restrictive permissions:
+**AmneziaWG panel (wg-easy):**
+- **Username**: `admin` + 3 random alphanumeric characters (e.g. `adminx7k`)
+- **Password**: 16-24 random characters (letters, digits, and `!@#%^&*`)
+- Credentials are written to `docker-compose.yml` as `INIT_USERNAME` / `INIT_PASSWORD` env vars (used only on first container start)
+- Retrieve: `grep 'INIT_USERNAME\|INIT_PASSWORD' /opt/vpn007/docker-compose.yml`
 
-```bash
-chmod 600 deploy/deploy.log
-```
+The AmneziaWG panel setup (user creation, host/port configuration) is fully automated via wg-easy's unattended setup mechanism — no manual wizard interaction required.
 
 To retrieve credentials after deployment:
 
 ```bash
-# Check the deployment log
-grep -A2 "3x-ui admin" deploy/deploy.log
+# 3x-ui credentials
+docker exec -it vpn007_three_x_ui /app/x-ui setting -show
 
-# Or query the 3x-ui database directly
-sqlite3 deploy/data/three_x_ui/x-ui.db "SELECT username, password FROM users LIMIT 1;"
+# AmneziaWG credentials
+grep 'INIT_USERNAME\|INIT_PASSWORD' /opt/vpn007/docker-compose.yml
 ```
-
-The AmneziaWG panel (wg-easy) uses a separate auto-generated password, also printed during deployment and saved to the deployment log.
 
 ## Inter-VM forwarding (relay architecture)
 
@@ -1662,7 +1661,26 @@ HYPOTHESIS_PROFILE=ci pytest
 
 ## Uninstalling VPN007
 
-To completely remove VPN007 from a server:
+To completely remove VPN007 from a server, use the cleanup script:
+
+```bash
+# Full cleanup (removes everything including client configs)
+sudo /opt/vpn007/scripts/cleanup.sh
+
+# Or keep client configs and certificates
+sudo /opt/vpn007/scripts/cleanup.sh --keep-data
+```
+
+The cleanup script handles:
+- Stopping and removing all Docker containers, networks, and images
+- Removing nftables firewall rules (restores accept-all policy)
+- Disabling and removing systemd timers/services
+- Unloading the AmneziaWG kernel module
+- Resetting kernel parameters
+- Removing the deployment directory (unless `--keep-data`)
+- Restarting the Docker daemon
+
+**Manual cleanup** (if the script is unavailable):
 
 ```bash
 cd /opt/vpn007
