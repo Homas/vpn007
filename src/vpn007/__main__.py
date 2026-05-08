@@ -917,54 +917,73 @@ def _patch_awg_i_params(config: DeployConfig, compose_path: Path) -> None:
         auth_str = _b64.b64encode(f"{awg_username}:{awg_password}".encode()).decode()
         base_url = f"http://127.0.0.1:{awg_panel_port}"
 
-        # Check if client already exists
-        try:
-            list_req = urllib.request.Request(
-                f"{base_url}/api/client",
-                headers={"Authorization": f"Basic {auth_str}"},
-            )
-            with urllib.request.urlopen(list_req, timeout=10) as resp:
-                clients = json.loads(resp.read())
-                existing = next((c for c in clients if c.get("name") == peer_name), None)
-                if existing:
-                    logger.info("AWG client '%s' already exists — skipping.", peer_name)
-                else:
-                    # Create the client
-                    create_data = json.dumps({"name": peer_name, "expiresAt": None}).encode()
-                    create_req = urllib.request.Request(
-                        f"{base_url}/api/client",
-                        data=create_data,
-                        headers={
-                            "Authorization": f"Basic {auth_str}",
-                            "Content-Type": "application/json",
-                        },
-                        method="POST",
-                    )
-                    with urllib.request.urlopen(create_req, timeout=10) as create_resp:
-                        result = json.loads(create_resp.read())
-                        if result.get("success"):
-                            client_id = result.get("clientId")
-                            logger.info("Created AWG client '%s' via API (id=%s).", peer_name, client_id)
+        # Wait for wg-easy API to be fully ready (DB initialized)
+        logger.info("Waiting for wg-easy API to be ready...")
+        api_ready = False
+        for _ in range(15):
+            try:
+                check_req = urllib.request.Request(
+                    f"{base_url}/api/client",
+                    headers={"Authorization": f"Basic {auth_str}"},
+                )
+                with urllib.request.urlopen(check_req, timeout=5) as resp:
+                    if resp.status == 200:
+                        api_ready = True
+                        break
+            except (urllib.error.URLError, OSError):
+                pass
+            time.sleep(3)
 
-                            # Download the client configuration file
-                            if client_id:
-                                try:
-                                    conf_req = urllib.request.Request(
-                                        f"{base_url}/api/client/{client_id}/configuration",
-                                        headers={"Authorization": f"Basic {auth_str}"},
-                                    )
-                                    with urllib.request.urlopen(conf_req, timeout=10) as conf_resp:
-                                        conf_content = conf_resp.read().decode("utf-8")
-                                        conf_path = config.output_dir / "clients" / f"awg-{peer_name}.conf"
-                                        conf_path.parent.mkdir(parents=True, exist_ok=True)
-                                        conf_path.write_text(conf_content, encoding="utf-8")
-                                        logger.info("Saved AWG client config to %s", conf_path)
-                                except (urllib.error.URLError, OSError) as exc:
-                                    logger.warning("Failed to download AWG client config: %s", exc)
-                        else:
-                            logger.warning("AWG client creation response: %s", result)
-        except (urllib.error.URLError, OSError) as exc:
-            logger.warning("Failed to create AWG client via API: %s", exc)
+        if not api_ready:
+            logger.warning("wg-easy API not ready after 45s — skipping client creation.")
+        else:
+            try:
+                list_req = urllib.request.Request(
+                    f"{base_url}/api/client",
+                    headers={"Authorization": f"Basic {auth_str}"},
+                )
+                with urllib.request.urlopen(list_req, timeout=10) as resp:
+                    clients = json.loads(resp.read())
+                    existing = next((c for c in clients if c.get("name") == peer_name), None)
+                    if existing:
+                        logger.info("AWG client '%s' already exists — skipping.", peer_name)
+                    else:
+                        # Create the client
+                        create_data = json.dumps({"name": peer_name, "expiresAt": None}).encode()
+                        create_req = urllib.request.Request(
+                            f"{base_url}/api/client",
+                            data=create_data,
+                            headers={
+                                "Authorization": f"Basic {auth_str}",
+                                "Content-Type": "application/json",
+                            },
+                            method="POST",
+                        )
+                        with urllib.request.urlopen(create_req, timeout=10) as create_resp:
+                            result = json.loads(create_resp.read())
+                            if result.get("success"):
+                                client_id = result.get("clientId")
+                                logger.info("Created AWG client '%s' via API (id=%s).", peer_name, client_id)
+
+                                # Download the client configuration file
+                                if client_id:
+                                    try:
+                                        conf_req = urllib.request.Request(
+                                            f"{base_url}/api/client/{client_id}/configuration",
+                                            headers={"Authorization": f"Basic {auth_str}"},
+                                        )
+                                        with urllib.request.urlopen(conf_req, timeout=10) as conf_resp:
+                                            conf_content = conf_resp.read().decode("utf-8")
+                                            conf_path = config.output_dir / "clients" / f"awg-{peer_name}.conf"
+                                            conf_path.parent.mkdir(parents=True, exist_ok=True)
+                                            conf_path.write_text(conf_content, encoding="utf-8")
+                                            logger.info("Saved AWG client config to %s", conf_path)
+                                    except (urllib.error.URLError, OSError) as exc:
+                                        logger.warning("Failed to download AWG client config: %s", exc)
+                            else:
+                                logger.warning("AWG client creation response: %s", result)
+            except (urllib.error.URLError, OSError) as exc:
+                logger.warning("Failed to create AWG client via API: %s", exc)
 
     # --- Step 3: Restart to regenerate wg0.conf with I params from DB ---
     logger.info("Restarting amneziawg to apply I params...")
