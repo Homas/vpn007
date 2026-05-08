@@ -102,6 +102,10 @@ table inet filter {
         ip saddr 172.20.0.0/16 accept
         # Allow return traffic to Docker bridge containers
         ip daddr 172.20.0.0/16 ct state established,related accept
+
+        # Allow AmneziaWG VPN clients to reach the internet
+        ip saddr 10.8.0.0/24 accept
+        ip6 saddr fdcc:ad94:bacf:61a4::cafe:0/112 accept
     }
 
     chain output {
