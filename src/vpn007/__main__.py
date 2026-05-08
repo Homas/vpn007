@@ -852,15 +852,13 @@ def _patch_awg_i_params(config: DeployConfig, compose_path: Path) -> None:
         )
         return
 
-    # Stop the container to avoid DB locking conflicts
-    logger.info("Stopping amneziawg container for DB update...")
-    subprocess.run(
-        ["docker", "compose", "-f", str(compose_path),
-         "--project-name", "vpn007", "stop", "amneziawg"],
-        capture_output=True, text=True, timeout=30,
-    )
-    time.sleep(2)
+    # Wait a bit more for wg-easy to finish its startup initialization
+    # (it resets the DB from env vars during startup)
+    time.sleep(5)
 
+    # Update the DB while the container is running — wg-easy uses SQLite WAL
+    # mode so concurrent reads are safe. The config is regenerated on next
+    # peer change or container restart.
     try:
         conn = sqlite3_mod.connect(str(db_path))
         cursor = conn.cursor()
@@ -951,12 +949,13 @@ def _patch_awg_i_params(config: DeployConfig, compose_path: Path) -> None:
 
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to update wg-easy database: %s", exc)
+        return
 
-    # Start the container — it will regenerate wg0.conf from DB with I params
-    logger.info("Starting amneziawg container...")
+    # Restart the container so it regenerates wg0.conf from the updated DB
+    logger.info("Restarting amneziawg container to apply DB changes...")
     subprocess.run(
         ["docker", "compose", "-f", str(compose_path),
-         "--project-name", "vpn007", "start", "amneziawg"],
+         "--project-name", "vpn007", "restart", "amneziawg"],
         capture_output=True, text=True, timeout=60,
     )
 
