@@ -805,21 +805,23 @@ def _provision_xray_inbound(config: DeployConfig) -> None:
 
 
 def _patch_awg_i_params(config: DeployConfig, compose_path: Path) -> None:
-    """Set I1-I5 CPS signature params and provision default client in wg-easy DB.
+    """Set I1-I5 CPS signature params in wg-easy DB and create default client via API.
 
     wg-easy does not support I1-I5 via environment variables (per docs: "All
     parameters except I1-I5 will be set at first startup"). This function
     writes them directly to the wg-easy SQLite database (interfaces_table,
-    user_configs_table) and restarts the container so it regenerates wg0.conf
-    from the DB with I params included.
+    user_configs_table) and then creates the default client via the wg-easy
+    REST API.
 
-    Also provisions the default AWG peer as a client in the DB if not already
-    present, so it appears in the wg-easy web UI.
+    The unattended setup (INIT_* env vars) handles user creation and host/port
+    configuration on first start. This function runs after that completes.
     """
     import sqlite3 as sqlite3_mod
     import time
+    import urllib.error
+    import urllib.request
 
-    from vpn007.crypto import generate_awg_obfuscation, generate_wg_keypair
+    from vpn007.crypto import generate_awg_obfuscation
 
     # Resolve I params: use explicit config, or fall back to defaults
     awg = config.awg_obfuscation
@@ -838,32 +840,37 @@ def _patch_awg_i_params(config: DeployConfig, compose_path: Path) -> None:
 
     db_path = config.output_dir / "data" / "amneziawg" / "wg-easy.db"
 
-    # Wait for wg-easy to create the database on first startup
-    logger.info("Waiting for wg-easy database...")
-    for attempt in range(20):
+    # Wait for wg-easy to finish startup and create the database
+    logger.info("Waiting for wg-easy to complete startup...")
+    for attempt in range(30):
         if db_path.exists() and db_path.stat().st_size > 1000:
-            break
+            # Also check that setup is complete (setup_step = 0)
+            try:
+                conn = sqlite3_mod.connect(str(db_path))
+                cur = conn.cursor()
+                cur.execute("SELECT setup_step FROM general_table LIMIT 1")
+                row = cur.fetchone()
+                conn.close()
+                if row and row[0] == 0:
+                    logger.debug("wg-easy setup complete (attempt %d)", attempt + 1)
+                    break
+            except Exception:
+                pass
         time.sleep(2)
     else:
         logger.warning(
-            "wg-easy database not found at %s after 40s — "
-            "skipping I-param provisioning.",
-            db_path,
+            "wg-easy not ready after 60s — skipping I-param provisioning."
         )
         return
 
-    # Wait a bit more for wg-easy to finish its startup initialization
-    # (it resets the DB from env vars during startup)
-    time.sleep(5)
+    # Give wg-easy a moment to finish writing its initial config
+    time.sleep(3)
 
-    # Update the DB while the container is running — wg-easy uses SQLite WAL
-    # mode so concurrent reads are safe. The config is regenerated on next
-    # peer change or container restart.
+    # --- Step 1: Update I params in the DB ---
     try:
         conn = sqlite3_mod.connect(str(db_path))
         cursor = conn.cursor()
 
-        # Update I params on the interface
         cursor.execute(
             "UPDATE interfaces_table SET i1=?, i2=?, i3=?, i4=?, i5=? WHERE name='wg0'",
             (i1, i2, i3, i4, i5),
@@ -873,86 +880,76 @@ def _patch_awg_i_params(config: DeployConfig, compose_path: Path) -> None:
         else:
             logger.warning("No 'wg0' row found in interfaces_table.")
 
-        # Update default I params for new clients
         cursor.execute(
             "UPDATE user_configs_table SET default_i1=?, default_i2=?, default_i3=?, default_i4=?, default_i5=?",
             (i1, i2, i3, i4, i5),
         )
         logger.info("Set default I params on user_configs_table.")
 
-        # Provision default client if not already present
-        peer_name = config.awg_initial_peer or "default-peer"
-        cursor.execute(
-            "SELECT id FROM clients_table WHERE name=?", (peer_name,)
-        )
-        if cursor.fetchone() is None:
-            # Generate keys for the peer
-            private_key, public_key = generate_wg_keypair()
-            import secrets as _secrets
-            psk = _secrets.token_bytes(32)
-            import base64 as _b64
-            psk_b64 = _b64.b64encode(psk).decode()
-
-            # Find next available IPv4/IPv6 addresses
-            cursor.execute("SELECT ipv4_address FROM clients_table ORDER BY id DESC LIMIT 1")
-            last_row = cursor.fetchone()
-            if last_row and last_row[0]:
-                # Increment last octet
-                parts = last_row[0].split(".")
-                next_ip = f"{parts[0]}.{parts[1]}.{parts[2]}.{int(parts[3]) + 1}"
-            else:
-                next_ip = "10.8.0.2"
-
-            # IPv6: increment last hex digit
-            cursor.execute("SELECT ipv6_address FROM clients_table ORDER BY id DESC LIMIT 1")
-            last_v6 = cursor.fetchone()
-            if last_v6 and last_v6[0]:
-                v6_parts = last_v6[0].rsplit(":", 1)
-                next_v6 = f"{v6_parts[0]}:{int(v6_parts[1], 16) + 1:x}"
-            else:
-                next_v6 = "fdcc:ad94:bacf:61a4::cafe:2"
-
-            # Get user_id (first user)
-            cursor.execute("SELECT id FROM users_table LIMIT 1")
-            user_row = cursor.fetchone()
-            user_id = user_row[0] if user_row else 1
-
-            # Get server endpoint
-            server_endpoint = f"{config.domain}:{config.awg_listen_port or 51820}"
-
-            cursor.execute(
-                """INSERT INTO clients_table
-                (user_id, interface_id, name, ipv4_address, ipv6_address,
-                 pre_up, post_up, pre_down, post_down,
-                 private_key, public_key, pre_shared_key,
-                 expires_at, allowed_ips, server_allowed_ips,
-                 persistent_keepalive, mtu, dns, server_endpoint, enabled,
-                 j_c, j_min, j_max, i1, i2, i3, i4, i5, firewall_ips)
-                VALUES (?, 'wg0', ?, ?, ?,
-                        '', '', '', '',
-                        ?, ?, ?,
-                        NULL, NULL, '[]',
-                        0, 1420, NULL, ?, 1,
-                        ?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
-                (user_id, peer_name, next_ip, next_v6,
-                 private_key, public_key, psk_b64,
-                 server_endpoint,
-                 awg.jc, awg.jmin, awg.jmax,
-                 i1, i2, i3, i4, i5),
-            )
-            logger.info("Provisioned default AWG peer '%s' in wg-easy DB (IP: %s)", peer_name, next_ip)
-        else:
-            logger.info("AWG peer '%s' already exists in DB — skipping.", peer_name)
-
         conn.commit()
         conn.close()
-
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Failed to update wg-easy database: %s", exc)
+        logger.warning("Failed to update wg-easy database with I params: %s", exc)
         return
 
-    # Restart the container so it regenerates wg0.conf from the updated DB
-    logger.info("Restarting amneziawg container to apply DB changes...")
+    # --- Step 2: Create default client via API ---
+    peer_name = config.awg_initial_peer or "default-peer"
+    awg_panel_port = config.awg_panel_port
+
+    # Read AWG admin credentials from the generated docker-compose.yml
+    # (they were generated during compose rendering)
+    awg_username = None
+    awg_password = None
+    compose_content = compose_path.read_text()
+    for line in compose_content.splitlines():
+        line = line.strip()
+        if line.startswith("- INIT_USERNAME="):
+            awg_username = line.split("=", 1)[1]
+        elif line.startswith("- INIT_PASSWORD="):
+            awg_password = line.split("=", 1)[1]
+
+    if not awg_username or not awg_password:
+        logger.warning("Could not find AWG admin credentials in docker-compose.yml — skipping client creation.")
+    else:
+        # Use Basic Auth to create the client via API
+        import base64 as _b64
+        auth_str = _b64.b64encode(f"{awg_username}:{awg_password}".encode()).decode()
+        base_url = f"http://127.0.0.1:{awg_panel_port}"
+
+        # Check if client already exists
+        try:
+            list_req = urllib.request.Request(
+                f"{base_url}/api/client",
+                headers={"Authorization": f"Basic {auth_str}"},
+            )
+            with urllib.request.urlopen(list_req, timeout=10) as resp:
+                import json
+                clients = json.loads(resp.read())
+                if any(c.get("name") == peer_name for c in clients):
+                    logger.info("AWG client '%s' already exists — skipping.", peer_name)
+                else:
+                    # Create the client
+                    create_data = json.dumps({"name": peer_name}).encode()
+                    create_req = urllib.request.Request(
+                        f"{base_url}/api/client",
+                        data=create_data,
+                        headers={
+                            "Authorization": f"Basic {auth_str}",
+                            "Content-Type": "application/json",
+                        },
+                        method="POST",
+                    )
+                    with urllib.request.urlopen(create_req, timeout=10) as create_resp:
+                        result = json.loads(create_resp.read())
+                        if result.get("success"):
+                            logger.info("Created AWG client '%s' via API.", peer_name)
+                        else:
+                            logger.warning("AWG client creation response: %s", result)
+        except (urllib.error.URLError, OSError) as exc:
+            logger.warning("Failed to create AWG client via API: %s", exc)
+
+    # --- Step 3: Restart to regenerate wg0.conf with I params from DB ---
+    logger.info("Restarting amneziawg to apply I params...")
     subprocess.run(
         ["docker", "compose", "-f", str(compose_path),
          "--project-name", "vpn007", "restart", "amneziawg"],
@@ -960,7 +957,7 @@ def _patch_awg_i_params(config: DeployConfig, compose_path: Path) -> None:
     )
 
     # Verify
-    time.sleep(3)
+    time.sleep(5)
     wg_conf_path = config.output_dir / "data" / "amneziawg" / "wg0.conf"
     if wg_conf_path.exists():
         content = wg_conf_path.read_text()

@@ -111,6 +111,10 @@ def _build_template_context(config: DeployConfig) -> dict:
     awg_listen_port = _resolve_awg_listen_port(config)
     awg_obfuscation = _resolve_awg_obfuscation(config)
 
+    # Generate AWG panel admin credentials for unattended setup
+    from vpn007.clients import generate_3xui_admin_credentials
+    awg_admin_username, awg_admin_password = generate_3xui_admin_credentials()
+
     return {
         # General
         "domain": _yaml_safe(config.domain),
@@ -121,6 +125,8 @@ def _build_template_context(config: DeployConfig) -> dict:
         "awg_listen_port": awg_listen_port,
         "awg_panel_port": config.awg_panel_port,
         "awg_obfuscation": awg_obfuscation,
+        "awg_admin_username": awg_admin_username,
+        "awg_admin_password": awg_admin_password,
         # Tailscale
         "tailscale_auth_key": (
             _yaml_safe(config.tailscale_auth_key)
