@@ -913,6 +913,7 @@ def _patch_awg_i_params(config: DeployConfig, compose_path: Path) -> None:
     else:
         # Use Basic Auth to create the client via API
         import base64 as _b64
+        import json
         auth_str = _b64.b64encode(f"{awg_username}:{awg_password}".encode()).decode()
         base_url = f"http://127.0.0.1:{awg_panel_port}"
 
@@ -923,9 +924,9 @@ def _patch_awg_i_params(config: DeployConfig, compose_path: Path) -> None:
                 headers={"Authorization": f"Basic {auth_str}"},
             )
             with urllib.request.urlopen(list_req, timeout=10) as resp:
-                import json
                 clients = json.loads(resp.read())
-                if any(c.get("name") == peer_name for c in clients):
+                existing = next((c for c in clients if c.get("name") == peer_name), None)
+                if existing:
                     logger.info("AWG client '%s' already exists — skipping.", peer_name)
                 else:
                     # Create the client
@@ -942,7 +943,24 @@ def _patch_awg_i_params(config: DeployConfig, compose_path: Path) -> None:
                     with urllib.request.urlopen(create_req, timeout=10) as create_resp:
                         result = json.loads(create_resp.read())
                         if result.get("success"):
-                            logger.info("Created AWG client '%s' via API.", peer_name)
+                            client_id = result.get("clientId")
+                            logger.info("Created AWG client '%s' via API (id=%s).", peer_name, client_id)
+
+                            # Download the client configuration file
+                            if client_id:
+                                try:
+                                    conf_req = urllib.request.Request(
+                                        f"{base_url}/api/client/{client_id}/configuration",
+                                        headers={"Authorization": f"Basic {auth_str}"},
+                                    )
+                                    with urllib.request.urlopen(conf_req, timeout=10) as conf_resp:
+                                        conf_content = conf_resp.read().decode("utf-8")
+                                        conf_path = config.output_dir / "clients" / f"awg-{peer_name}.conf"
+                                        conf_path.parent.mkdir(parents=True, exist_ok=True)
+                                        conf_path.write_text(conf_content, encoding="utf-8")
+                                        logger.info("Saved AWG client config to %s", conf_path)
+                                except (urllib.error.URLError, OSError) as exc:
+                                    logger.warning("Failed to download AWG client config: %s", exc)
                         else:
                             logger.warning("AWG client creation response: %s", result)
         except (urllib.error.URLError, OSError) as exc:
