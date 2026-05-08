@@ -112,8 +112,13 @@ def _build_template_context(config: DeployConfig) -> dict:
     awg_obfuscation = _resolve_awg_obfuscation(config)
 
     # Generate AWG panel admin credentials for unattended setup
+    import secrets as _secrets
+    import string as _string
+    awg_admin_username = "admin" + "".join(
+        _secrets.choice(_string.ascii_lowercase + _string.digits) for _ in range(3)
+    )
     from vpn007.clients import generate_3xui_admin_credentials
-    awg_admin_username, awg_admin_password = generate_3xui_admin_credentials()
+    _, awg_admin_password = generate_3xui_admin_credentials()
 
     return {
         # General

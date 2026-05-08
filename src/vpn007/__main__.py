@@ -929,7 +929,7 @@ def _patch_awg_i_params(config: DeployConfig, compose_path: Path) -> None:
                     logger.info("AWG client '%s' already exists — skipping.", peer_name)
                 else:
                     # Create the client
-                    create_data = json.dumps({"name": peer_name}).encode()
+                    create_data = json.dumps({"name": peer_name, "expiresAt": None}).encode()
                     create_req = urllib.request.Request(
                         f"{base_url}/api/client",
                         data=create_data,
