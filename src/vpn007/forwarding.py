@@ -93,6 +93,8 @@ def generate_forwarding_script(config: DeployConfig) -> str:
         # Tunnel configuration
         "tunnel_type": config.tunnel_type.value if config.tunnel_type else "wireguard",
         "reverse_initiated": config.reverse_initiated,
+        # Forwarding mode
+        "forwarding_mode": config.forwarding_mode.value,
         # Tunnel subnet and IPs
         "tunnel_subnet": config.tunnel_subnet,
         "tunnel_primary_ip": tunnel_primary_ip,

@@ -340,6 +340,7 @@ When both `SSH_APPROVED_IPS` and `SSH_APPROVED_HOSTNAMES` are empty, SSH is open
 | Flag | Env var | Default | Description |
 |------|---------|---------|-------------|
 | `--forwarding-enabled` | `FORWARDING_ENABLED` | `false` | Enable traffic forwarding to secondary VM |
+| `--forwarding-mode` | `FORWARDING_MODE` | `ports` | Forwarding mode: `ports` (per-port DNAT) or `all` (full-traffic routing) |
 | `--tunnel-type` | `TUNNEL_TYPE` | *(none)* | Tunnel type: `wireguard`, `ssh`, or `tailscale` |
 | `--secondary-vm-ip` | `SECONDARY_VM_IP` | *(none)* | IP of the secondary VM |
 | `--reverse-initiated` | `REVERSE_INITIATED` | `false` | Secondary VM initiates tunnel back |
@@ -410,8 +411,9 @@ The deployer validates all parameters at startup and exits with a clear error me
 | `TLS_VERSIONS` | Comma-separated; only `1.2` and `1.3` accepted |
 | `HTTPS_PORT` | Integer 1-65535 |
 | `TUNNEL_TYPE` | Must be `wireguard`, `ssh`, or `tailscale` when `FORWARDING_ENABLED=true` |
+| `FORWARDING_MODE` | Must be `ports` or `all`; `all` requires `wireguard` or `tailscale` tunnel type |
 | `SECONDARY_VM_IP` | Required when `FORWARDING_ENABLED=true` |
-| `FORWARDING_PORTS` | Required when `FORWARDING_ENABLED=true`; format `proto:port:port[:desc]` |
+| `FORWARDING_PORTS` | Required when `FORWARDING_MODE=ports`; format `proto:port:port[:desc]` |
 | `EXIT_NODE_TUNNEL_TYPE` | Required when `EXIT_NODE_ENABLED=true` |
 | `EXIT_NODE_PEER_IP` | Required when `EXIT_NODE_ENABLED=true`; valid IP address |
 | `EXIT_NODE_TUNNEL_SUBNET` | Must differ from `TUNNEL_SUBNET` when both are enabled |
@@ -861,6 +863,44 @@ REVERSE_INITIATED=false
 RECONNECT_INITIAL_DELAY_SEC=5
 RECONNECT_MAX_DELAY_SEC=300
 ```
+
+#### Full-traffic forwarding (all VPN client traffic through exit node)
+
+Instead of forwarding specific ports, you can route **all** VPN client traffic through the tunnel. This means every packet from connected VPN clients exits from VM-B's IP — not just traffic on specific ports.
+
+```bash
+# Enable forwarding
+FORWARDING_ENABLED=true
+
+# Route ALL VPN client traffic through the tunnel (not just specific ports)
+FORWARDING_MODE=all
+
+# Must be wireguard or tailscale (ssh does not support full-traffic mode)
+TUNNEL_TYPE=wireguard
+
+# VM-B's public IP address
+SECONDARY_VM_IP=198.51.100.20
+
+# FORWARDING_PORTS is not needed in "all" mode
+```
+
+**How it works:**
+- Traffic from Docker bridge networks (172.16.0.0/12) and AmneziaWG client subnets (10.0.0.0/8) is marked with nftables
+- Marked packets are policy-routed through the tunnel interface to VM-B
+- VM-B masquerades the traffic to the internet
+- The cover website and management panels still respond from VM-A's own IP (they are not affected by the policy routing)
+
+**When to use `all` vs `ports`:**
+
+| Mode | Use case |
+|------|----------|
+| `ports` (default) | Forward only specific services; keep some traffic local |
+| `all` | Complete IP separation — all client internet traffic exits from VM-B |
+
+**Limitations of `all` mode:**
+- Requires `wireguard` or `tailscale` tunnel type (SSH tunnels cannot carry arbitrary IP traffic)
+- All VPN client traffic goes through the tunnel — higher bandwidth usage on the tunnel link
+- If the tunnel goes down, all client traffic is dropped (fail-closed, same as `ports` mode)
 
 Then run the deployer:
 

@@ -18,6 +18,7 @@ from vpn007.models import (
     AwgObfuscation,
     CoverSiteMode,
     DeployConfig,
+    ForwardingMode,
     PortForward,
     TunnelType,
 )
@@ -100,6 +101,11 @@ def _parse_tunnel_type(value: str) -> TunnelType | None:
     return TunnelType(stripped)
 
 
+def _parse_forwarding_mode(value: str) -> ForwardingMode:
+    """Parse ForwardingMode enum from string."""
+    return ForwardingMode(value.strip().lower())
+
+
 def _parse_tls_versions(value: str) -> list[str]:
     """Parse TLS version list from comma-separated string."""
     return [v.strip() for v in value.split(",") if v.strip()]
@@ -165,6 +171,7 @@ _ENV_FIELD_MAP: list[tuple[str, str, type | object]] = [
     ("BLOCKLIST_UPDATE_INTERVAL_HOURS", "blocklist_update_interval_hours", int),
     # Forwarding
     ("FORWARDING_ENABLED", "forwarding_enabled", _parse_bool),
+    ("FORWARDING_MODE", "forwarding_mode", _parse_forwarding_mode),
     ("TUNNEL_TYPE", "tunnel_type", _parse_tunnel_type),
     ("SECONDARY_VM_IP", "secondary_vm_ip", str),
     ("REVERSE_INITIATED", "reverse_initiated", _parse_bool),

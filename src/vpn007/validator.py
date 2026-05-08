@@ -7,7 +7,7 @@ from __future__ import annotations
 import ipaddress
 import re
 
-from vpn007.models import AwgObfuscation, DeployConfig
+from vpn007.models import AwgObfuscation, DeployConfig, ForwardingMode, TunnelType
 
 
 def validate_config(config: DeployConfig) -> list[str]:
@@ -92,6 +92,17 @@ def validate_config(config: DeployConfig) -> list[str]:
             errors.append(
                 "secondary_vm_ip is required when forwarding_enabled is True"
             )
+        if config.forwarding_mode == ForwardingMode.PORTS:
+            if not config.forwarding_ports:
+                errors.append(
+                    "forwarding_ports is required when forwarding_mode is 'ports'"
+                )
+        elif config.forwarding_mode == ForwardingMode.ALL:
+            if config.tunnel_type == TunnelType.SSH:
+                errors.append(
+                    "forwarding_mode 'all' is not supported with tunnel_type 'ssh'; "
+                    "use 'wireguard' or 'tailscale' for full-traffic forwarding"
+                )
 
     # --- Exit node role config consistency ---
     if config.exit_node_enabled:

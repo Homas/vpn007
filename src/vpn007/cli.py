@@ -238,6 +238,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Enable inter-VM forwarding (true/false)",
     )
     fwd.add_argument(
+        "--forwarding-mode",
+        default=None,
+        help="Forwarding mode: 'ports' (forward specific ports via DNAT) or 'all' (route all VPN client traffic through tunnel)",
+    )
+    fwd.add_argument(
         "--tunnel-type",
         default=None,
         help="Tunnel type: wireguard, ssh, or tailscale",

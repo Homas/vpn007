@@ -15,6 +15,13 @@ class TunnelType(Enum):
     TAILSCALE = "tailscale"
 
 
+class ForwardingMode(Enum):
+    """Forwarding mode for inter-VM traffic."""
+
+    PORTS = "ports"  # Forward specific ports via DNAT (default)
+    ALL = "all"  # Route all VPN client traffic through the tunnel
+
+
 class CoverSiteMode(Enum):
     """Cover site serving mode."""
 
@@ -181,6 +188,7 @@ class DeployConfig:
 
     # Forwarding
     forwarding_enabled: bool = False
+    forwarding_mode: ForwardingMode = ForwardingMode.PORTS
     tunnel_type: TunnelType | None = None
     secondary_vm_ip: str | None = None
     reverse_initiated: bool = False
