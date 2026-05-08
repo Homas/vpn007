@@ -38,7 +38,7 @@ _ADMIN_USERNAME_MAX_LEN = 12
 _ADMIN_PASSWORD_MIN_LEN = 16
 _ADMIN_PASSWORD_MAX_LEN = 24
 _ADMIN_USERNAME_CHARS = string.ascii_letters + string.digits
-_ADMIN_PASSWORD_CHARS = string.ascii_letters + string.digits + "!@#$%^&*"
+_ADMIN_PASSWORD_CHARS = string.ascii_letters + string.digits + "!@#%^&*"
 
 
 def provision_xray_client(
