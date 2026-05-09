@@ -35,6 +35,7 @@ class HostInfo:
     hostnames: list[str] = field(default_factory=list)
     cert_cn: str = ""
     cert_sans: list[str] = field(default_factory=list)
+    cn_matches_ip: bool = False
 
     @property
     def cert_names(self) -> list[str]:
@@ -104,6 +105,26 @@ def reverse_lookup(ip: str) -> list[str]:
             if name:
                 names.append(name)
         return names
+    except (subprocess.TimeoutExpired, OSError):
+        return []
+
+
+def resolve_name(name: str) -> list[str]:
+    """Resolve a hostname to its A-record IPs using dig."""
+    try:
+        result = subprocess.run(
+            ["dig", "+short", "A", name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        ips: list[str] = []
+        for line in result.stdout.strip().splitlines():
+            line = line.strip()
+            # Only keep lines that look like IPs (skip CNAMEs)
+            if re.match(r"^\d+\.\d+\.\d+\.\d+$", line):
+                ips.append(line)
+        return ips
     except (subprocess.TimeoutExpired, OSError):
         return []
 
@@ -179,6 +200,10 @@ def enrich_hosts(hosts: list[HostInfo]) -> None:
             cn, sans = get_certificate_names(host.ip)
             host.cert_cn = cn
             host.cert_sans = sans
+            # Check if CN resolves back to this IP
+            if cn and not cn.startswith("*"):
+                resolved_ips = resolve_name(cn)
+                host.cn_matches_ip = host.ip in resolved_ips
 
 
 def format_text(hosts: list[HostInfo]) -> str:
@@ -205,7 +230,7 @@ def format_text(hosts: list[HostInfo]) -> str:
     )
     cn_w = max(
         len("CN/SANs"),
-        *(len(name) for h in hosts for name in h.cert_names),
+        *(len(name) + 2 for h in hosts for name in h.cert_names),  # +1 for potential * (space *)
         1,
     )
 
@@ -217,6 +242,9 @@ def format_text(hosts: list[HostInfo]) -> str:
         ports_str = ", ".join(str(p) for p in h.open_ports)
         dns_list = h.hostnames if h.hostnames else ["-"]
         cn_list = h.cert_names if h.cert_names else ["-"]
+        # Mark first entry (CN) with * if it resolves to this IP
+        if h.cn_matches_ip and cn_list[0] != "-":
+            cn_list = [f"{cn_list[0]} *"] + cn_list[1:]
         row_count = max(len(dns_list), len(cn_list))
 
         for i in range(row_count):
@@ -235,13 +263,14 @@ def format_csv(hosts: list[HostInfo]) -> str:
     """Produce CSV output with one row per IP."""
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["IP", "Open Ports", "DNS (rDNS)", "CN/SANs"])
+    writer.writerow(["IP", "Open Ports", "DNS (rDNS)", "CN/SANs", "CN Matches IP"])
     for h in hosts:
         writer.writerow([
             h.ip,
             ", ".join(str(p) for p in h.open_ports),
             "; ".join(h.hostnames) if h.hostnames else "",
             "; ".join(h.cert_names) if h.cert_names else "",
+            h.cn_matches_ip,
         ])
     return buf.getvalue()
 
@@ -254,6 +283,7 @@ def format_json(hosts: list[HostInfo]) -> str:
             "open_ports": h.open_ports,
             "dns": h.hostnames,
             "cert_names": h.cert_names,
+            "cn_matches_ip": h.cn_matches_ip,
         }
         for h in hosts
     ]
