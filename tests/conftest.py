@@ -130,7 +130,7 @@ valid_deploy_config = st.builds(
     blocklist_update_interval_hours=st.integers(1, 168),
     forwarding_enabled=st.just(False),
     tunnel_type=st.none(),
-    secondary_vm_ip=st.none(),
+    exit_node_host=st.none(),
     reverse_initiated=st.just(False),
     forwarding_ports=st.just([]),
     reconnect_initial_delay_sec=st.integers(1, 60),
@@ -158,7 +158,7 @@ def valid_config_with_forwarding() -> DeployConfig:
         domain="vpn.example.com",
         forwarding_enabled=True,
         tunnel_type=TunnelType.WIREGUARD,
-        secondary_vm_ip="10.0.0.2",
+        exit_node_host="10.0.0.2",
         forwarding_ports=[
             PortForward(protocol="tcp", listen_port=443, forward_port=443),
             PortForward(protocol="udp", listen_port=51820, forward_port=51820),
@@ -214,7 +214,7 @@ def valid_config_full() -> DeployConfig:
         blocklist_update_interval_hours=6,
         forwarding_enabled=True,
         tunnel_type=TunnelType.WIREGUARD,
-        secondary_vm_ip="10.0.0.2",
+        exit_node_host="10.0.0.2",
         reverse_initiated=False,
         forwarding_ports=[
             PortForward(protocol="tcp", listen_port=443, forward_port=443),

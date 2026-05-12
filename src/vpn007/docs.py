@@ -81,7 +81,7 @@ def _build_template_context(config: DeployConfig) -> dict:
         # Forwarding
         "forwarding_enabled": config.forwarding_enabled,
         "tunnel_type": config.tunnel_type.value if config.tunnel_type else None,
-        "secondary_vm_ip": config.secondary_vm_ip,
+        "exit_node_host": config.exit_node_host,
         "reverse_initiated": config.reverse_initiated,
         "forwarding_ports": config.forwarding_ports,
         "reconnect_initial_delay_sec": config.reconnect_initial_delay_sec,

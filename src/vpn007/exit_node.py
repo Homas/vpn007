@@ -89,7 +89,7 @@ def generate_exit_node_nftables(config: DeployConfig) -> str:
     tunnel_iface = _tunnel_interface_name(config.exit_node_tunnel_type or TunnelType.WIREGUARD)
 
     context = {
-        "peer_ip": config.exit_node_peer_ip,
+        "peer_ip": config.exit_node_peer_host,
         "tunnel_type": (config.exit_node_tunnel_type or TunnelType.WIREGUARD).value,
         "tunnel_subnet": config.exit_node_tunnel_subnet,
         "local_tunnel_ip": local_ip,
@@ -132,7 +132,7 @@ def generate_exit_node_wg_config(config: DeployConfig) -> tuple[str, str, str]:
         "listen_port": config.exit_node_listen_port,
         "peer_public_key": peer_public_key,
         "peer_tunnel_ip": peer_ip,
-        "peer_ip": config.exit_node_peer_ip,
+        "peer_ip": config.exit_node_peer_host,
         "peer_listen_port": peer_listen_port,
         "reverse_initiated": config.exit_node_reverse_initiated,
         "nftables_conf_path": nftables_conf_path,
@@ -187,7 +187,7 @@ WantedBy=multi-user.target
     else:
         # We initiate the SSH tunnel TO the peer VM
         autossh_service = f"""[Unit]
-Description=VPN007 Exit Node — SSH tunnel to peer ({config.exit_node_peer_ip})
+Description=VPN007 Exit Node — SSH tunnel to peer ({config.exit_node_peer_host})
 Documentation=https://github.com/Homas/vpn007
 After=network-online.target
 Wants=network-online.target
@@ -204,7 +204,7 @@ ExecStart=/usr/bin/autossh -M {autossh_monitor_port} -N \\
     -o "ExitOnForwardFailure=yes" \\
     -i {ssh_key_path} \\
     -w 0:0 \\
-    {ssh_tunnel_user}@{config.exit_node_peer_ip}
+    {ssh_tunnel_user}@{config.exit_node_peer_host}
 ExecStop=/usr/sbin/nft delete table ip vpn007_exit_node
 Restart=always
 RestartSec=5
@@ -220,7 +220,7 @@ WantedBy=multi-user.target
 set -euo pipefail
 
 echo "[+] VPN007 Exit Node SSH Tunnel Setup"
-echo "[+] Peer VM: {config.exit_node_peer_ip}"
+echo "[+] Peer VM: {config.exit_node_peer_host}"
 echo ""
 
 # Install autossh if not present
@@ -261,16 +261,16 @@ systemctl enable --now vpn007-exit-node-ssh.service
 
 echo ""
 echo "[+] Done! SSH exit-node tunnel is active."
-echo "[+] Public key to install on peer VM ({config.exit_node_peer_ip}):"
+echo "[+] Public key to install on peer VM ({config.exit_node_peer_host}):"
 echo ""
 echo "    {public_key_openssh}"
 echo ""
 echo "    Create the tunnel user and install the key on the peer VM:"
 echo ""
-echo "    ssh root@{config.exit_node_peer_ip} 'useradd -r -s /usr/sbin/nologin -d /home/{ssh_tunnel_user} -m {ssh_tunnel_user}'"
-echo "    ssh root@{config.exit_node_peer_ip} 'mkdir -p /home/{ssh_tunnel_user}/.ssh && chmod 700 /home/{ssh_tunnel_user}/.ssh'"
-echo "    ssh root@{config.exit_node_peer_ip} 'echo \\"{public_key_openssh}\\" >> /home/{ssh_tunnel_user}/.ssh/authorized_keys'"
-echo "    ssh root@{config.exit_node_peer_ip} 'chmod 600 /home/{ssh_tunnel_user}/.ssh/authorized_keys && chown -R {ssh_tunnel_user}:{ssh_tunnel_user} /home/{ssh_tunnel_user}/.ssh'"
+echo "    ssh root@{config.exit_node_peer_host} 'useradd -r -s /usr/sbin/nologin -d /home/{ssh_tunnel_user} -m {ssh_tunnel_user}'"
+echo "    ssh root@{config.exit_node_peer_host} 'mkdir -p /home/{ssh_tunnel_user}/.ssh && chmod 700 /home/{ssh_tunnel_user}/.ssh'"
+echo "    ssh root@{config.exit_node_peer_host} 'echo \\"{public_key_openssh}\\" >> /home/{ssh_tunnel_user}/.ssh/authorized_keys'"
+echo "    ssh root@{config.exit_node_peer_host} 'chmod 600 /home/{ssh_tunnel_user}/.ssh/authorized_keys && chown -R {ssh_tunnel_user}:{ssh_tunnel_user} /home/{ssh_tunnel_user}/.ssh'"
 echo ""
 echo "[+] Verify with: systemctl status vpn007-exit-node-ssh"
 """
@@ -317,7 +317,7 @@ WantedBy=multi-user.target
 set -euo pipefail
 
 echo "[+] VPN007 Exit Node Tailscale Setup"
-echo "[+] Peer VM: {config.exit_node_peer_ip}"
+echo "[+] Peer VM: {config.exit_node_peer_host}"
 echo ""
 
 # Install Tailscale if not present
@@ -352,7 +352,7 @@ systemctl enable --now vpn007-exit-node-tailscale.service
 
 echo ""
 echo "[+] Done! Tailscale exit-node forwarding is active."
-echo "[+] Ensure the peer VM ({config.exit_node_peer_ip}) is on the same tailnet."
+echo "[+] Ensure the peer VM ({config.exit_node_peer_host}) is on the same tailnet."
 echo "[+] The peer VM should use this node's Tailscale IP as its tunnel endpoint."
 echo ""
 echo "[+] Verify with:"
@@ -435,7 +435,7 @@ def generate_exit_node_xray_config(config: DeployConfig) -> tuple[str, str, str]
 #
 # The primary VM (entrance node) uses these to connect to this exit node.
 
-SERVER_ADDRESS={config.exit_node_peer_ip or "THIS_VM_IP"}
+SERVER_ADDRESS={config.exit_node_peer_host or "THIS_VM_IP"}
 SERVER_PORT={listen_port}
 UUID={tunnel_uuid}
 REALITY_PUBLIC_KEY={reality_keys.public_key}
@@ -444,7 +444,7 @@ SNI={tunnel_sni}
 FLOW=xtls-rprx-vision
 
 # VLESS share link (import into Xray client or 3x-ui):
-# vless://{tunnel_uuid}@{config.exit_node_peer_ip or "THIS_VM_IP"}:{listen_port}?security=reality&sni={tunnel_sni}&fp=chrome&pbk={reality_keys.public_key}&sid={reality_keys.short_id}&type=tcp&flow=xtls-rprx-vision#vpn007-tunnel
+# vless://{tunnel_uuid}@{config.exit_node_peer_host or "THIS_VM_IP"}:{listen_port}?security=reality&sni={tunnel_sni}&fp=chrome&pbk={reality_keys.public_key}&sid={reality_keys.short_id}&type=tcp&flow=xtls-rprx-vision#vpn007-tunnel
 
 # For a FULL VPN007 node as exit:
 # Instead of running standalone Xray, add a client with UUID={tunnel_uuid}
@@ -459,7 +459,7 @@ FLOW=xtls-rprx-vision
 set -euo pipefail
 
 echo "[+] VPN007 Exit Node Xray VLESS+Reality Setup"
-echo "[+] Peer VM: {config.exit_node_peer_ip}"
+echo "[+] Peer VM: {config.exit_node_peer_host}"
 echo ""
 
 # Install Xray if not present
@@ -599,7 +599,7 @@ This VM is configured to serve as an **exit node** for another VPN007 instance.
 
 | Parameter | Value |
 |-----------|-------|
-| Peer VM IP | `{config.exit_node_peer_ip}` |
+| Peer VM IP | `{config.exit_node_peer_host}` |
 | Tunnel type | `{tunnel_type}` |
 | Tunnel subnet | `{config.exit_node_tunnel_subnet}` |
 | Local tunnel IP | `{local_ip}` (this VM) |
@@ -610,7 +610,7 @@ This VM is configured to serve as an **exit node** for another VPN007 instance.
 ## How it works
 
 This VM runs the full VPN007 stack (serving its own VPN clients) AND accepts
-forwarded traffic from the peer VM (`{config.exit_node_peer_ip}`).
+forwarded traffic from the peer VM (`{config.exit_node_peer_host}`).
 
 - Traffic arriving on the **public interface** → handled by local VPN services
 - Traffic arriving on the **tunnel interface** from `{peer_ip}` → masqueraded to internet
@@ -709,7 +709,7 @@ peer VM. This user has no shell and cannot execute commands — it only holds
 the SSH connection open for port forwarding.
 
 ```bash
-# On the peer VM ({config.exit_node_peer_ip}):
+# On the peer VM ({config.exit_node_peer_host}):
 useradd -r -s /usr/sbin/nologin -d /home/vpn007-tunnel -m vpn007-tunnel
 mkdir -p /home/vpn007-tunnel/.ssh
 chmod 700 /home/vpn007-tunnel/.ssh
@@ -748,7 +748,7 @@ systemctl status vpn007-exit-node-ssh
 nft list table ip vpn007_exit_node
 
 # Check SSH tunnel connectivity (from this VM to the peer)
-ssh -i /root/.ssh/vpn007_exit_node_key vpn007-tunnel@{config.exit_node_peer_ip} "echo ok"
+ssh -i /root/.ssh/vpn007_exit_node_key vpn007-tunnel@{config.exit_node_peer_host} "echo ok"
 # Note: this will fail with "This account is currently not available" which is
 # expected — the nologin shell rejects interactive sessions. The tunnel uses
 # -N (no command) so it works despite the restricted shell.
@@ -820,7 +820,7 @@ systemctl enable --now vpn007-exit-node-tailscale.service
 
 ```bash
 # Check Tailscale connectivity to the peer
-tailscale ping {config.exit_node_peer_ip}
+tailscale ping {config.exit_node_peer_host}
 
 # Check nftables exit-node table
 nft list table ip vpn007_exit_node

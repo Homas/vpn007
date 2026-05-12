@@ -248,9 +248,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Tunnel type: wireguard, ssh, or tailscale",
     )
     fwd.add_argument(
-        "--secondary-vm-ip",
+        "--exit-node-host",
         default=None,
-        help="IP address of the secondary VM",
+        help="IP address or hostname of the exit node (secondary VM)",
     )
     fwd.add_argument(
         "--reverse-initiated",
@@ -307,9 +307,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Tunnel type for exit node role: wireguard, ssh, tailscale, or xray",
     )
     exit_node.add_argument(
-        "--exit-node-peer-ip",
+        "--exit-node-peer-host",
         default=None,
-        help="IP of the peer VM that forwards traffic to this exit node",
+        help="IP or hostname of the peer VM that forwards traffic to this exit node",
     )
     exit_node.add_argument(
         "--exit-node-tunnel-subnet",

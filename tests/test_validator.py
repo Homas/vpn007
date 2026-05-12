@@ -71,7 +71,7 @@ class TestValidConfig:
             ssh_approved_ips=["192.168.1.100"],
             forwarding_enabled=True,
             tunnel_type=TunnelType.WIREGUARD,
-            secondary_vm_ip="10.0.0.2",
+            exit_node_host="10.0.0.2",
             forwarding_ports=[
                 PortForward(protocol="tcp", listen_port=443, forward_port=443),
             ],
@@ -156,13 +156,13 @@ class TestIPValidation:
         errors = validate_config(_config(public_ipv6="not-ipv6"))
         assert any("public_ipv6" in e for e in errors)
 
-    def test_invalid_secondary_vm_ip(self) -> None:
+    def test_invalid_exit_node_host(self) -> None:
         errors = validate_config(_config(
             forwarding_enabled=True,
             tunnel_type=TunnelType.SSH,
-            secondary_vm_ip="bad-ip",
+            exit_node_host="-bad.host",
         ))
-        assert any("secondary_vm_ip" in e for e in errors)
+        assert any("exit_node_host" in e for e in errors)
 
     def test_valid_ipv4_addresses(self) -> None:
         cfg = _config(
@@ -409,36 +409,36 @@ class TestForwardingConsistency:
         cfg = _config(
             forwarding_enabled=True,
             tunnel_type=None,
-            secondary_vm_ip="10.0.0.2",
+            exit_node_host="10.0.0.2",
         )
         errors = validate_config(cfg)
         assert any("tunnel_type" in e for e in errors)
 
-    def test_forwarding_without_secondary_ip(self) -> None:
+    def test_forwarding_without_exit_node_host(self) -> None:
         cfg = _config(
             forwarding_enabled=True,
             tunnel_type=TunnelType.SSH,
-            secondary_vm_ip=None,
+            exit_node_host=None,
         )
         errors = validate_config(cfg)
-        assert any("secondary_vm_ip" in e for e in errors)
+        assert any("exit_node_host" in e for e in errors)
 
     def test_forwarding_missing_both(self) -> None:
         cfg = _config(
             forwarding_enabled=True,
             tunnel_type=None,
-            secondary_vm_ip=None,
+            exit_node_host=None,
         )
         errors = validate_config(cfg)
         assert any("tunnel_type" in e for e in errors)
-        assert any("secondary_vm_ip" in e for e in errors)
+        assert any("exit_node_host" in e for e in errors)
 
     def test_forwarding_disabled_no_checks(self) -> None:
-        """When forwarding is disabled, tunnel_type and secondary_vm_ip are not required."""
+        """When forwarding is disabled, tunnel_type and exit_node_host are not required."""
         cfg = _config(
             forwarding_enabled=False,
             tunnel_type=None,
-            secondary_vm_ip=None,
+            exit_node_host=None,
         )
         errors = validate_config(cfg)
         assert errors == []
@@ -447,7 +447,7 @@ class TestForwardingConsistency:
         cfg = _config(
             forwarding_enabled=True,
             tunnel_type=TunnelType.WIREGUARD,
-            secondary_vm_ip="10.0.0.2",
+            exit_node_host="10.0.0.2",
             forwarding_ports=[PortForward(protocol="tcp", listen_port=443, forward_port=443, description="HTTPS")],
         )
         errors = validate_config(cfg)
@@ -594,7 +594,7 @@ class TestProperty2MissingRequiredParameter:
         reports 'tunnel_type' in the error."""
         config.forwarding_enabled = True
         config.tunnel_type = None
-        config.secondary_vm_ip = "10.0.0.2"
+        config.exit_node_host = "10.0.0.2"
         errors = validate_config(config)
         assert any("tunnel_type" in e for e in errors), (
             f"Expected error mentioning 'tunnel_type', got: {errors}"
@@ -602,17 +602,17 @@ class TestProperty2MissingRequiredParameter:
 
     @given(config=valid_deploy_config)
     @h_settings(max_examples=100)
-    def test_forwarding_without_secondary_ip_names_parameter(
+    def test_forwarding_without_exit_node_host_names_parameter(
         self, config: DeployConfig
     ) -> None:
-        """When forwarding is enabled but secondary_vm_ip is None, validator
-        reports 'secondary_vm_ip' in the error."""
+        """When forwarding is enabled but exit_node_host is None, validator
+        reports 'exit_node_host' in the error."""
         config.forwarding_enabled = True
         config.tunnel_type = TunnelType.WIREGUARD
-        config.secondary_vm_ip = None
+        config.exit_node_host = None
         errors = validate_config(config)
-        assert any("secondary_vm_ip" in e for e in errors), (
-            f"Expected error mentioning 'secondary_vm_ip', got: {errors}"
+        assert any("exit_node_host" in e for e in errors), (
+            f"Expected error mentioning 'exit_node_host', got: {errors}"
         )
 
 
@@ -667,17 +667,25 @@ class TestProperty2InvalidIPAddresses:
             f"Expected error for public_ipv6={bad_ip!r}, got: {errors}"
         )
 
-    @given(config=valid_deploy_config, bad_ip=_invalid_ip)
+    @given(config=valid_deploy_config, bad_host=st.one_of(
+        st.just(""),
+        st.just("-bad.example.com"),
+        st.just("bad-.example.com"),
+        st.just("host name with spaces"),
+        st.just("a" * 64 + ".com"),
+        st.just("under_score.example.com"),
+        st.just("!invalid.com"),
+    ))
     @h_settings(max_examples=100)
-    def test_invalid_secondary_vm_ip_rejected(
-        self, config: DeployConfig, bad_ip: str
+    def test_invalid_exit_node_host_rejected(
+        self, config: DeployConfig, bad_host: str
     ) -> None:
         config.forwarding_enabled = True
         config.tunnel_type = TunnelType.SSH
-        config.secondary_vm_ip = bad_ip
+        config.exit_node_host = bad_host
         errors = validate_config(config)
-        assert any("secondary_vm_ip" in e for e in errors), (
-            f"Expected error for secondary_vm_ip={bad_ip!r}, got: {errors}"
+        assert any("exit_node_host" in e for e in errors), (
+            f"Expected error for exit_node_host={bad_host!r}, got: {errors}"
         )
 
 

@@ -173,7 +173,7 @@ _ENV_FIELD_MAP: list[tuple[str, str, type | object]] = [
     ("FORWARDING_ENABLED", "forwarding_enabled", _parse_bool),
     ("FORWARDING_MODE", "forwarding_mode", _parse_forwarding_mode),
     ("TUNNEL_TYPE", "tunnel_type", _parse_tunnel_type),
-    ("SECONDARY_VM_IP", "secondary_vm_ip", str),
+    ("EXIT_NODE_HOST", "exit_node_host", str),
     ("REVERSE_INITIATED", "reverse_initiated", _parse_bool),
     ("FORWARDING_PORTS", "forwarding_ports", _parse_port_forwards),
     ("RECONNECT_INITIAL_DELAY_SEC", "reconnect_initial_delay_sec", int),
@@ -184,7 +184,7 @@ _ENV_FIELD_MAP: list[tuple[str, str, type | object]] = [
     # Exit node role
     ("EXIT_NODE_ENABLED", "exit_node_enabled", _parse_bool),
     ("EXIT_NODE_TUNNEL_TYPE", "exit_node_tunnel_type", _parse_tunnel_type),
-    ("EXIT_NODE_PEER_IP", "exit_node_peer_ip", str),
+    ("EXIT_NODE_PEER_HOST", "exit_node_peer_host", str),
     ("EXIT_NODE_TUNNEL_SUBNET", "exit_node_tunnel_subnet", str),
     ("EXIT_NODE_LISTEN_PORT", "exit_node_listen_port", int),
     ("EXIT_NODE_REVERSE_INITIATED", "exit_node_reverse_initiated", _parse_bool),

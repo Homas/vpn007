@@ -342,7 +342,7 @@ When both `SSH_APPROVED_IPS` and `SSH_APPROVED_HOSTNAMES` are empty, SSH is open
 | `--forwarding-enabled` | `FORWARDING_ENABLED` | `false` | Enable traffic forwarding to secondary VM |
 | `--forwarding-mode` | `FORWARDING_MODE` | `ports` | Forwarding mode: `ports` (per-port DNAT) or `all` (full-traffic routing) |
 | `--tunnel-type` | `TUNNEL_TYPE` | *(none)* | Tunnel type: `wireguard`, `ssh`, `tailscale`, or `xray` |
-| `--secondary-vm-ip` | `SECONDARY_VM_IP` | *(none)* | IP of the secondary VM |
+| `--exit-node-host` | `EXIT_NODE_HOST` | *(none)* | IP address or hostname of the exit node (secondary VM) |
 | `--reverse-initiated` | `REVERSE_INITIATED` | `false` | Secondary VM initiates tunnel back |
 | `--forwarding-ports` | `FORWARDING_PORTS` | *(none)* | Port forwards (`proto:listen:fwd[:desc],...`) |
 | `--reconnect-initial-delay-sec` | `RECONNECT_INITIAL_DELAY_SEC` | `5` | Initial reconnect delay (seconds) |
@@ -359,7 +359,7 @@ When a VM runs the full VPN007 stack AND also serves as an exit node for another
 |------|---------|---------|-------------|
 | `--exit-node-enabled` | `EXIT_NODE_ENABLED` | `false` | Accept forwarded traffic from another VPN007 node |
 | `--exit-node-tunnel-type` | `EXIT_NODE_TUNNEL_TYPE` | *(none)* | Tunnel type: `wireguard`, `ssh`, or `tailscale` |
-| `--exit-node-peer-ip` | `EXIT_NODE_PEER_IP` | *(none)* | IP of the peer VM forwarding traffic to us |
+| `--exit-node-peer-host` | `EXIT_NODE_PEER_HOST` | *(none)* | IP address or hostname of the peer VM forwarding traffic to us |
 | `--exit-node-tunnel-subnet` | `EXIT_NODE_TUNNEL_SUBNET` | `10.99.1.0/30` | Tunnel subnet (must differ from `TUNNEL_SUBNET`) |
 | `--exit-node-listen-port` | `EXIT_NODE_LISTEN_PORT` | `51822` | WireGuard listen port for exit-node tunnel |
 | `--exit-node-reverse-initiated` | `EXIT_NODE_REVERSE_INITIATED` | `false` | Peer initiates tunnel to this exit node |
@@ -414,10 +414,10 @@ The deployer validates all parameters at startup and exits with a clear error me
 | `HTTPS_PORT` | Integer 1-65535 |
 | `TUNNEL_TYPE` | Must be `wireguard`, `ssh`, `tailscale`, or `xray` when `FORWARDING_ENABLED=true` |
 | `FORWARDING_MODE` | Must be `ports` or `all`; `all` requires `wireguard`, `tailscale`, or `xray` tunnel type |
-| `SECONDARY_VM_IP` | Required when `FORWARDING_ENABLED=true` |
+| `EXIT_NODE_HOST` | Required when `FORWARDING_ENABLED=true`; valid IP address or hostname |
 | `FORWARDING_PORTS` | Required when `FORWARDING_MODE=ports`; format `proto:port:port[:desc]` |
 | `EXIT_NODE_TUNNEL_TYPE` | Required when `EXIT_NODE_ENABLED=true` |
-| `EXIT_NODE_PEER_IP` | Required when `EXIT_NODE_ENABLED=true`; valid IP address |
+| `EXIT_NODE_PEER_HOST` | Required when `EXIT_NODE_ENABLED=true`; valid IP address or hostname |
 | `EXIT_NODE_TUNNEL_SUBNET` | Must differ from `TUNNEL_SUBNET` when both are enabled |
 | `APPROVED_IPS`, `SSH_APPROVED_IPS` | Valid IPv4/IPv6 addresses or CIDR notation |
 | `BLOCKED_AS_NUMBERS` | Must match `AS<digits>` format |
@@ -853,7 +853,7 @@ FORWARDING_ENABLED=true
 TUNNEL_TYPE=wireguard
 
 # VM-B's public IP address
-SECONDARY_VM_IP=198.51.100.20
+EXIT_NODE_HOST=198.51.100.20
 
 # Ports to forward from VM-A to VM-B
 # Format: protocol:listen_port:forward_port:description
@@ -882,7 +882,7 @@ FORWARDING_MODE=all
 TUNNEL_TYPE=wireguard
 
 # VM-B's public IP address
-SECONDARY_VM_IP=198.51.100.20
+EXIT_NODE_HOST=198.51.100.20
 
 # FORWARDING_PORTS is not needed in "all" mode
 ```
@@ -1030,7 +1030,7 @@ No extra software needed. The primary VM connects as a regular VLESS client to V
 ```bash
 # .env on VM-A
 TUNNEL_TYPE=xray
-SECONDARY_VM_IP=198.51.100.20
+EXIT_NODE_HOST=198.51.100.20
 TUNNEL_XRAY_SNI=www.google.com   # Can differ from client-facing REALITY_SNI
 TUNNEL_XRAY_PORT=443
 ```
@@ -1063,7 +1063,7 @@ With SSH tunnel type, this creates a reverse SSH tunnel where VM-B connects to V
 DOMAIN=vpn.example.com
 FORWARDING_ENABLED=true
 TUNNEL_TYPE=wireguard
-SECONDARY_VM_IP=198.51.100.20
+EXIT_NODE_HOST=198.51.100.20
 FORWARDING_PORTS=tcp:443:443:HTTPS,udp:51820:51820:AmneziaWG
 RECONNECT_INITIAL_DELAY_SEC=5
 RECONNECT_MAX_DELAY_SEC=300
@@ -1140,7 +1140,7 @@ FORWARDING_ENABLED=false
 
 # Remove or comment out these:
 # TUNNEL_TYPE=
-# SECONDARY_VM_IP=
+# EXIT_NODE_HOST=
 # FORWARDING_PORTS=
 ```
 
@@ -1313,14 +1313,14 @@ DOMAIN=vpn-a.example.com
 # Forward my clients' traffic to VM-B
 FORWARDING_ENABLED=true
 TUNNEL_TYPE=wireguard
-SECONDARY_VM_IP=198.51.100.20
+EXIT_NODE_HOST=198.51.100.20
 TUNNEL_SUBNET=10.99.0.0/30
 FORWARDING_PORTS=tcp:443:443:HTTPS,udp:51820:51820:AWG
 
 # Also serve as exit node for VM-B's forwarded traffic
 EXIT_NODE_ENABLED=true
 EXIT_NODE_TUNNEL_TYPE=wireguard
-EXIT_NODE_PEER_IP=198.51.100.20
+EXIT_NODE_PEER_HOST=198.51.100.20
 EXIT_NODE_TUNNEL_SUBNET=10.99.1.0/30
 EXIT_NODE_LISTEN_PORT=51822
 ```
@@ -1334,14 +1334,14 @@ DOMAIN=vpn-b.example.com
 # Forward my clients' traffic to VM-A
 FORWARDING_ENABLED=true
 TUNNEL_TYPE=wireguard
-SECONDARY_VM_IP=203.0.113.10
+EXIT_NODE_HOST=203.0.113.10
 TUNNEL_SUBNET=10.99.0.0/30
 FORWARDING_PORTS=tcp:443:443:HTTPS,udp:51820:51820:AWG
 
 # Also serve as exit node for VM-A's forwarded traffic
 EXIT_NODE_ENABLED=true
 EXIT_NODE_TUNNEL_TYPE=wireguard
-EXIT_NODE_PEER_IP=203.0.113.10
+EXIT_NODE_PEER_HOST=203.0.113.10
 EXIT_NODE_TUNNEL_SUBNET=10.99.1.0/30
 EXIT_NODE_LISTEN_PORT=51822
 ```
@@ -1399,7 +1399,7 @@ To stop forwarding traffic from this VM to a remote exit node (VM-B) and route t
 FORWARDING_ENABLED=false
 # Comment out or remove:
 # TUNNEL_TYPE=
-# SECONDARY_VM_IP=
+# EXIT_NODE_HOST=
 # FORWARDING_PORTS=
 ```
 
@@ -1459,7 +1459,7 @@ To stop this VM from accepting forwarded traffic from another VPN007 instance (s
 EXIT_NODE_ENABLED=false
 # Comment out or remove:
 # EXIT_NODE_TUNNEL_TYPE=
-# EXIT_NODE_PEER_IP=
+# EXIT_NODE_PEER_HOST=
 # EXIT_NODE_TUNNEL_SUBNET=
 # EXIT_NODE_LISTEN_PORT=
 ```
@@ -1828,7 +1828,7 @@ usage: vpn007 [-h] [--version] [--env-file ENV_FILE] [--dry-run] [--debug]
               [--blocked-subnets BLOCKED_SUBNETS]
               [--blocklist-update-interval-hours BLOCKLIST_UPDATE_INTERVAL_HOURS]
               [--forwarding-enabled FORWARDING_ENABLED] [--tunnel-type TUNNEL_TYPE]
-              [--secondary-vm-ip SECONDARY_VM_IP]
+              [--exit-node-host EXIT_NODE_HOST]
               [--reverse-initiated REVERSE_INITIATED]
               [--forwarding-ports FORWARDING_PORTS]
               [--reconnect-initial-delay-sec RECONNECT_INITIAL_DELAY_SEC]
@@ -1836,7 +1836,7 @@ usage: vpn007 [-h] [--version] [--env-file ENV_FILE] [--dry-run] [--debug]
               [--tunnel-subnet TUNNEL_SUBNET]
               [--exit-node-enabled EXIT_NODE_ENABLED]
               [--exit-node-tunnel-type EXIT_NODE_TUNNEL_TYPE]
-              [--exit-node-peer-ip EXIT_NODE_PEER_IP]
+              [--exit-node-peer-host EXIT_NODE_PEER_HOST]
               [--exit-node-tunnel-subnet EXIT_NODE_TUNNEL_SUBNET]
               [--exit-node-listen-port EXIT_NODE_LISTEN_PORT]
               [--exit-node-reverse-initiated EXIT_NODE_REVERSE_INITIATED]

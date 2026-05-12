@@ -208,9 +208,9 @@ class TestForwardingArguments:
         args = parse_args(["--tunnel-type", "wireguard"])
         assert args.tunnel_type == "wireguard"
 
-    def test_secondary_vm_ip(self) -> None:
-        args = parse_args(["--secondary-vm-ip", "10.0.0.5"])
-        assert args.secondary_vm_ip == "10.0.0.5"
+    def test_exit_node_host(self) -> None:
+        args = parse_args(["--exit-node-host", "10.0.0.5"])
+        assert args.exit_node_host == "10.0.0.5"
 
     def test_reverse_initiated(self) -> None:
         args = parse_args(["--reverse-initiated", "true"])

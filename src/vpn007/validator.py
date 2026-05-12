@@ -25,7 +25,7 @@ def validate_config(config: DeployConfig) -> list[str]:
         errors.extend(_validate_domain(config.domain))
 
     # --- IP addresses ---
-    for field_name in ("incoming_ip", "outgoing_ip", "public_ipv4", "secondary_vm_ip"):
+    for field_name in ("incoming_ip", "outgoing_ip", "public_ipv4"):
         value = getattr(config, field_name)
         if value is not None:
             if not _is_valid_ip(value):
@@ -34,6 +34,11 @@ def validate_config(config: DeployConfig) -> list[str]:
     if config.public_ipv6 is not None:
         if not _is_valid_ip(config.public_ipv6):
             errors.append(f"Invalid IP address for public_ipv6: {config.public_ipv6!r}")
+
+    # --- Host fields (accept IP or hostname) ---
+    if config.exit_node_host is not None:
+        if not _is_valid_host(config.exit_node_host):
+            errors.append(f"Invalid host for exit_node_host: {config.exit_node_host!r}")
 
     # --- CIDR subnets ---
     for subnet in config.blocked_subnets:
@@ -88,9 +93,9 @@ def validate_config(config: DeployConfig) -> list[str]:
             errors.append(
                 "tunnel_type is required when forwarding_enabled is True"
             )
-        if config.secondary_vm_ip is None:
+        if config.exit_node_host is None:
             errors.append(
-                "secondary_vm_ip is required when forwarding_enabled is True"
+                "exit_node_host is required when forwarding_enabled is True"
             )
         if config.forwarding_mode == ForwardingMode.PORTS:
             if not config.forwarding_ports:
@@ -110,9 +115,9 @@ def validate_config(config: DeployConfig) -> list[str]:
             errors.append(
                 "exit_node_tunnel_type is required when exit_node_enabled is True"
             )
-        if config.exit_node_peer_ip is None:
+        if config.exit_node_peer_host is None:
             errors.append(
-                "exit_node_peer_ip is required when exit_node_enabled is True"
+                "exit_node_peer_host is required when exit_node_enabled is True"
             )
         # Ensure exit node tunnel subnet doesn't overlap with forwarding tunnel subnet
         if config.forwarding_enabled and config.exit_node_tunnel_subnet == config.tunnel_subnet:
@@ -122,10 +127,10 @@ def validate_config(config: DeployConfig) -> list[str]:
                 "exit node role are enabled on the same VM"
             )
 
-    # Validate exit_node_peer_ip
-    if config.exit_node_peer_ip is not None and not _is_valid_ip(config.exit_node_peer_ip):
+    # Validate exit_node_peer_host
+    if config.exit_node_peer_host is not None and not _is_valid_host(config.exit_node_peer_host):
         errors.append(
-            f"Invalid IP address for exit_node_peer_ip: {config.exit_node_peer_ip!r}"
+            f"Invalid host for exit_node_peer_host: {config.exit_node_peer_host!r}"
         )
 
     return errors
@@ -180,6 +185,34 @@ def _is_valid_ip(value: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _is_valid_hostname(value: str) -> bool:
+    """Return True if *value* is a valid hostname per RFC 1123.
+
+    Rules:
+    - Total length <= 253 characters
+    - Each label <= 63 characters
+    - Labels contain only alphanumeric characters and hyphens
+    - Labels do not start or end with a hyphen
+    - At least one dot (i.e., at least two labels)
+    """
+    if not value or len(value) > 253:
+        return False
+    labels = value.rstrip(".").split(".")
+    if len(labels) < 2:
+        return False
+    for label in labels:
+        if not label or len(label) > 63:
+            return False
+        if not _LABEL_RE.match(label):
+            return False
+    return True
+
+
+def _is_valid_host(value: str) -> bool:
+    """Return True if *value* is a valid IP address or a valid hostname (RFC 1123)."""
+    return _is_valid_ip(value) or _is_valid_hostname(value)
 
 
 def _is_valid_cidr(value: str) -> bool:

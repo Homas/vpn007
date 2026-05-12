@@ -31,7 +31,7 @@ import time
 # ---------------------------------------------------------------------------
 
 PRIMARY_VM_IP: str = "{{ primary_vm_ip }}"
-SECONDARY_VM_IP: str = "{{ secondary_vm_ip }}"
+EXIT_NODE_HOST: str = "{{ exit_node_host }}"
 TUNNEL_TYPE: str = "{{ tunnel_type }}"
 REVERSE_INITIATED: bool = {{ "True" if reverse_initiated else "False" }}
 FORWARDING_MODE: str = "{{ forwarding_mode }}"
@@ -811,7 +811,7 @@ def main() -> None:
     log.info("VPN007 Inter-VM Forwarding Installer")
     log.info("=" * 60)
     log.info("Primary VM IP:    %s", PRIMARY_VM_IP)
-    log.info("Secondary VM IP:  %s", SECONDARY_VM_IP)
+    log.info("Exit node host:   %s", EXIT_NODE_HOST)
     log.info("Tunnel type:      %s", TUNNEL_TYPE)
     log.info("Forwarding mode:  %s", FORWARDING_MODE)
     log.info("Reverse initiated: %s", REVERSE_INITIATED)

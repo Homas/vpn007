@@ -40,7 +40,7 @@ valid_forwarding_config = st.builds(
     awg_listen_port=st.just(34567),
     forwarding_enabled=st.just(True),
     tunnel_type=st.sampled_from(TunnelType),
-    secondary_vm_ip=valid_ipv4,
+    exit_node_host=valid_ipv4,
     reverse_initiated=st.booleans(),
     forwarding_ports=st.lists(_forwarding_port_forward, min_size=1, max_size=5),
     reconnect_initial_delay_sec=st.integers(1, 60),
@@ -156,14 +156,14 @@ class TestProperty12ForwardingScriptGenerationCompleteness:
         )
 
     @given(config=valid_forwarding_config)
-    def test_secondary_vm_ip_embedded(self, config: DeployConfig) -> None:
-        """The secondary VM IP must be embedded in the script.
+    def test_exit_node_host_embedded(self, config: DeployConfig) -> None:
+        """The exit node host must be embedded in the script.
 
         **Validates: Requirements 10.10**
         """
         script = generate_forwarding_script(config)
-        assert config.secondary_vm_ip in script, (
-            f"Secondary VM IP {config.secondary_vm_ip} must appear in "
+        assert config.exit_node_host in script, (
+            f"Exit node host {config.exit_node_host} must appear in "
             f"generated script"
         )
 

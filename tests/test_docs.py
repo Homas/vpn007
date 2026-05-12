@@ -255,7 +255,7 @@ class TestGenerateDocs:
         readme = docs["README.md"]
         ts = docs["troubleshooting.md"]
         assert "enabled" in readme.lower()
-        assert valid_config_with_forwarding.secondary_vm_ip in readme
+        assert valid_config_with_forwarding.exit_node_host in readme
         # Troubleshooting should include forwarding-specific content
         assert "Forwarding" in ts
 

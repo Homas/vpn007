@@ -395,7 +395,7 @@ This deployment has inter-VM forwarding **enabled** via {{ tunnel_type or "confi
 
 2. **Ping the remote tunnel endpoint:**
    ```bash
-   ping {{ secondary_vm_ip or "<secondary_vm_ip>" }}
+   ping {{ exit_node_host or "<exit_node_host>" }}
    ```
 
 3. **Check tunnel status:**
@@ -454,5 +454,5 @@ The forwarding tunnel uses exponential backoff for reconnection:
 {% else %}
 Inter-VM forwarding is not enabled for this deployment. If you need to set up
 forwarding, configure the `FORWARDING_ENABLED`, `TUNNEL_TYPE`, and
-`SECONDARY_VM_IP` parameters in the `.env` file.
+`EXIT_NODE_HOST` parameters in the `.env` file.
 {% endif %}

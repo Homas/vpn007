@@ -485,7 +485,7 @@ _env_roundtrip_params = st.fixed_dictionaries(
         "incoming_ip": _valid_ipv4,
         "outgoing_ip": _valid_ipv4,
         "public_ipv6": st.just("2001:db8::1"),
-        "secondary_vm_ip": _valid_ipv4,
+        "exit_node_host": _valid_ipv4,
         "tunnel_type": st.sampled_from(TunnelType),
     },
 )
@@ -518,7 +518,7 @@ _FIELD_TO_ENV_NAME: dict[str, str] = {
     "blocklist_update_interval_hours": "BLOCKLIST_UPDATE_INTERVAL_HOURS",
     "forwarding_enabled": "FORWARDING_ENABLED",
     "tunnel_type": "TUNNEL_TYPE",
-    "secondary_vm_ip": "SECONDARY_VM_IP",
+    "exit_node_host": "EXIT_NODE_HOST",
     "reverse_initiated": "REVERSE_INITIATED",
     "forwarding_ports": "FORWARDING_PORTS",
     "reconnect_initial_delay_sec": "RECONNECT_INITIAL_DELAY_SEC",

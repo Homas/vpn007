@@ -55,7 +55,7 @@ def generate_forwarding_script(config: DeployConfig) -> str:
     ----------
     config:
         The deployment configuration.  Must have ``forwarding_enabled``
-        set to ``True`` and ``tunnel_type``, ``secondary_vm_ip``, and
+        set to ``True`` and ``tunnel_type``, ``exit_node_host``, and
         ``forwarding_ports`` populated.
 
     Returns
@@ -106,7 +106,7 @@ def generate_forwarding_script(config: DeployConfig) -> str:
     context = {
         # Primary VM connection info
         "primary_vm_ip": config.incoming_ip or config.public_ipv4 or "REPLACE_ME",
-        "secondary_vm_ip": config.secondary_vm_ip or "REPLACE_ME",
+        "exit_node_host": config.exit_node_host or "REPLACE_ME",
         # Tunnel configuration
         "tunnel_type": config.tunnel_type.value if config.tunnel_type else "wireguard",
         "reverse_initiated": config.reverse_initiated,

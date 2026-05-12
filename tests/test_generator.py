@@ -158,7 +158,7 @@ class TestGenerateAll:
             output_dir=tmp_path,
             forwarding_enabled=True,
             tunnel_type=TunnelType.WIREGUARD,
-            secondary_vm_ip="10.0.0.2",
+            exit_node_host="10.0.0.2",
             forwarding_ports=[
                 PortForward(
                     protocol="tcp", listen_port=443, forward_port=443
