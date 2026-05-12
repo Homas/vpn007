@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import os
 import random
+import uuid as _uuid_mod
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
@@ -103,6 +104,14 @@ def generate_ssh_keypair() -> tuple[str, str]:
     ).decode("ascii")
 
     return private_pem, public_openssh
+
+
+def generate_vless_uuid() -> str:
+    """Generate a random UUID for VLESS client/tunnel identification.
+
+    Returns a standard UUID v4 string (e.g., ``550e8400-e29b-41d4-a716-446655440000``).
+    """
+    return str(_uuid_mod.uuid4())
 
 
 def generate_awg_obfuscation() -> AwgObfuscation:

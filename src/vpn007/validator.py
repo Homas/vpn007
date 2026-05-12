@@ -101,7 +101,7 @@ def validate_config(config: DeployConfig) -> list[str]:
             if config.tunnel_type == TunnelType.SSH:
                 errors.append(
                     "forwarding_mode 'all' is not supported with tunnel_type 'ssh'; "
-                    "use 'wireguard' or 'tailscale' for full-traffic forwarding"
+                    "use 'wireguard', 'tailscale', or 'xray' for full-traffic forwarding"
                 )
 
     # --- Exit node role config consistency ---

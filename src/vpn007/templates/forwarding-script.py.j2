@@ -56,6 +56,14 @@ SSH_PORT: int = 22
 AUTOSSH_MONITOR_PORT: int = 20000
 SSH_TUNNEL_USER: str = "vpn007-tunnel"
 
+# Xray VLESS+Reality tunnel settings
+XRAY_TUNNEL_UUID: str = "{{ xray_tunnel_uuid }}"
+XRAY_TUNNEL_PRIVATE_KEY: str = "{{ xray_tunnel_private_key }}"
+XRAY_TUNNEL_PUBLIC_KEY: str = "{{ xray_tunnel_public_key }}"
+XRAY_TUNNEL_SHORT_ID: str = "{{ xray_tunnel_short_id }}"
+XRAY_TUNNEL_SNI: str = "{{ xray_tunnel_sni }}"
+XRAY_TUNNEL_PORT: int = {{ xray_tunnel_port }}
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -168,6 +176,26 @@ def install_tailscale() -> None:
         log.info("Tailscale already installed.")
 
 
+def install_xray() -> None:
+    """Install Xray binary for VLESS+Reality tunnel."""
+    log.info("Installing Xray for VLESS+Reality tunnel...")
+    xray_path = "/usr/local/bin/xray"
+    if os.path.exists(xray_path):
+        log.info("Xray already installed at %s.", xray_path)
+        return
+    try:
+        # Download the official Xray install script
+        run_cmd(["curl", "-fsSL", "https://github.com/XTLS/Xray-install/raw/main/install-release.sh", "-o", "/tmp/xray-install.sh"])
+        run_cmd(["bash", "/tmp/xray-install.sh", "install"])
+    except subprocess.CalledProcessError:
+        log.error("Failed to install Xray. Install manually: https://github.com/XTLS/Xray-core/releases")
+        sys.exit(1)
+    if not os.path.exists(xray_path) and not os.path.exists("/usr/bin/xray"):
+        log.error("Xray binary not found after installation.")
+        sys.exit(1)
+    log.info("Xray installed successfully.")
+
+
 def install_tunnel_endpoint() -> None:
     """Install the tunnel endpoint based on the configured tunnel type."""
     match TUNNEL_TYPE:
@@ -177,6 +205,8 @@ def install_tunnel_endpoint() -> None:
             install_ssh_tunnel()
         case "tailscale":
             install_tailscale()
+        case "xray":
+            install_xray()
         case _:
             log.error("Unknown tunnel type: %s", TUNNEL_TYPE)
             sys.exit(1)
@@ -377,6 +407,109 @@ def setup_tailscale_tunnel() -> None:
     log.info("Tailscale tunnel configured. Ensure both VMs are on the same tailnet.")
 
 
+def setup_xray_tunnel() -> None:
+    """Configure Xray VLESS+Reality tunnel.
+
+    This VM acts as the Xray server (exit node) — it receives VLESS+Reality
+    connections from the primary VM and routes traffic to the internet.
+
+    For a lightweight exit node: Xray listens directly on XRAY_TUNNEL_PORT.
+    For a full VPN007 node: the primary VM connects as a regular VLESS client
+    to the existing 3x-ui Xray instance (this function generates the standalone
+    Xray server config for the lightweight case).
+    """
+    log.info("Configuring Xray VLESS+Reality tunnel (server mode)...")
+
+    xray_config_dir = "/etc/xray"
+    os.makedirs(xray_config_dir, exist_ok=True)
+
+    # Generate Xray server config for the tunnel
+    xray_config = {
+        "log": {"loglevel": "warning"},
+        "inbounds": [
+            {
+                "tag": "vless-reality-tunnel",
+                "listen": "0.0.0.0",
+                "port": XRAY_TUNNEL_PORT,
+                "protocol": "vless",
+                "settings": {
+                    "clients": [
+                        {
+                            "id": XRAY_TUNNEL_UUID,
+                            "flow": "xtls-rprx-vision",
+                        }
+                    ],
+                    "decryption": "none",
+                },
+                "streamSettings": {
+                    "network": "tcp",
+                    "security": "reality",
+                    "realitySettings": {
+                        "show": False,
+                        "dest": f"{XRAY_TUNNEL_SNI}:443",
+                        "xver": 0,
+                        "serverNames": [XRAY_TUNNEL_SNI],
+                        "privateKey": XRAY_TUNNEL_PRIVATE_KEY,
+                        "shortIds": [XRAY_TUNNEL_SHORT_ID],
+                    },
+                },
+            }
+        ],
+        "outbounds": [
+            {
+                "tag": "direct",
+                "protocol": "freedom",
+                "settings": {},
+            }
+        ],
+    }
+
+    import json
+    config_path = f"{xray_config_dir}/config.json"
+    with open(config_path, "w") as f:
+        json.dump(xray_config, f, indent=2)
+    os.chmod(config_path, 0o600)
+    log.info("Xray config written to %s.", config_path)
+
+    # Create systemd service for Xray tunnel
+    xray_bin = "/usr/local/bin/xray"
+    if not os.path.exists(xray_bin):
+        xray_bin = "/usr/bin/xray"
+
+    service_content = f"""[Unit]
+Description=VPN007 Xray VLESS+Reality Tunnel (exit node)
+Documentation=https://github.com/Homas/vpn007
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={xray_bin} run -config {config_path}
+Restart=always
+RestartSec=5
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+"""
+    service_path = "/etc/systemd/system/vpn007-xray-tunnel.service"
+    with open(service_path, "w") as f:
+        f.write(service_content)
+
+    # Enable IP forwarding
+    run_cmd(["sysctl", "-w", "net.ipv4.ip_forward=1"])
+
+    # Start the service
+    run_cmd(["systemctl", "daemon-reload"])
+    run_cmd(["systemctl", "enable", "--now", "vpn007-xray-tunnel.service"])
+    log.info("Xray tunnel service started (listening on port %d).", XRAY_TUNNEL_PORT)
+    log.info("Primary VM should connect with:")
+    log.info("  UUID: %s", XRAY_TUNNEL_UUID)
+    log.info("  SNI: %s", XRAY_TUNNEL_SNI)
+    log.info("  Public key: %s", XRAY_TUNNEL_PUBLIC_KEY)
+    log.info("  Short ID: %s", XRAY_TUNNEL_SHORT_ID)
+
+
 def setup_tunnel() -> None:
     """Set up the encrypted tunnel based on the configured type."""
     match TUNNEL_TYPE:
@@ -386,6 +519,8 @@ def setup_tunnel() -> None:
             setup_ssh_tunnel()
         case "tailscale":
             setup_tailscale_tunnel()
+        case "xray":
+            setup_xray_tunnel()
         case _:
             log.error("Unknown tunnel type: %s", TUNNEL_TYPE)
             sys.exit(1)
@@ -406,6 +541,12 @@ def get_tunnel_peer_ip() -> str:
             return PRIMARY_VM_IP
         case "tailscale":
             # Use the primary VM's Tailscale IP — operator should replace
+            return PRIMARY_VM_IP
+        case "xray":
+            # Xray is a proxy, not a routed tunnel. For 'ports' mode,
+            # traffic is proxied through Xray (no DNAT needed on this VM).
+            # For 'all' mode, Xray uses tproxy. Return primary VM IP
+            # as a reference for nftables rules.
             return PRIMARY_VM_IP
         case _:
             return PRIMARY_VM_IP
@@ -595,6 +736,14 @@ def check_tunnel_health() -> bool:
                 capture=True,
             )
             return result.returncode == 0
+        case "xray":
+            # Check if the Xray tunnel service is running
+            result = run_cmd(
+                ["systemctl", "is-active", "vpn007-xray-tunnel.service"],
+                check=False,
+                capture=True,
+            )
+            return result.returncode == 0
         case _:
             return False
 
@@ -615,6 +764,8 @@ def reconnect_tunnel() -> None:
             run_cmd(["tailscale", "down"], check=False)
             time.sleep(1)
             run_cmd(["tailscale", "up"])
+        case "xray":
+            run_cmd(["systemctl", "restart", "vpn007-xray-tunnel.service"])
 
 
 def monitor_and_reconnect() -> None:

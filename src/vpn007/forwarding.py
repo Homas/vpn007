@@ -65,6 +65,8 @@ def generate_forwarding_script(config: DeployConfig) -> str:
     """
     import ipaddress as _ipaddress
 
+    from vpn007.crypto import generate_reality_keypair, generate_vless_uuid
+
     env = _create_jinja_env()
     template = env.get_template("forwarding-script.py.j2")
 
@@ -86,6 +88,21 @@ def generate_forwarding_script(config: DeployConfig) -> str:
     tunnel_primary_ip = str(tunnel_hosts[0]) if len(tunnel_hosts) >= 2 else "10.99.0.1"
     tunnel_secondary_ip = str(tunnel_hosts[1]) if len(tunnel_hosts) >= 2 else "10.99.0.2"
 
+    # Generate Xray tunnel credentials if tunnel_type is xray
+    xray_tunnel_uuid = ""
+    xray_tunnel_private_key = ""
+    xray_tunnel_public_key = ""
+    xray_tunnel_short_id = ""
+    xray_tunnel_sni = config.tunnel_xray_sni or config.reality_sni
+    xray_tunnel_port = config.tunnel_xray_port
+
+    if config.tunnel_type and config.tunnel_type.value == "xray":
+        xray_tunnel_uuid = generate_vless_uuid()
+        reality_keys = generate_reality_keypair()
+        xray_tunnel_private_key = reality_keys.private_key
+        xray_tunnel_public_key = reality_keys.public_key
+        xray_tunnel_short_id = reality_keys.short_id
+
     context = {
         # Primary VM connection info
         "primary_vm_ip": config.incoming_ip or config.public_ipv4 or "REPLACE_ME",
@@ -104,6 +121,13 @@ def generate_forwarding_script(config: DeployConfig) -> str:
         # Reconnection parameters
         "reconnect_initial_delay_sec": config.reconnect_initial_delay_sec,
         "reconnect_max_delay_sec": config.reconnect_max_delay_sec,
+        # Xray tunnel parameters
+        "xray_tunnel_uuid": xray_tunnel_uuid,
+        "xray_tunnel_private_key": xray_tunnel_private_key,
+        "xray_tunnel_public_key": xray_tunnel_public_key,
+        "xray_tunnel_short_id": xray_tunnel_short_id,
+        "xray_tunnel_sni": xray_tunnel_sni,
+        "xray_tunnel_port": xray_tunnel_port,
     }
 
     return template.render(context)

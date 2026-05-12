@@ -179,6 +179,8 @@ _ENV_FIELD_MAP: list[tuple[str, str, type | object]] = [
     ("RECONNECT_INITIAL_DELAY_SEC", "reconnect_initial_delay_sec", int),
     ("RECONNECT_MAX_DELAY_SEC", "reconnect_max_delay_sec", int),
     ("TUNNEL_SUBNET", "tunnel_subnet", str),
+    ("TUNNEL_XRAY_SNI", "tunnel_xray_sni", str),
+    ("TUNNEL_XRAY_PORT", "tunnel_xray_port", int),
     # Exit node role
     ("EXIT_NODE_ENABLED", "exit_node_enabled", _parse_bool),
     ("EXIT_NODE_TUNNEL_TYPE", "exit_node_tunnel_type", _parse_tunnel_type),

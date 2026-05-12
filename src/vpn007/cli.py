@@ -282,6 +282,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Tunnel subnet for inter-VM WireGuard link (default: 10.99.0.0/30)",
     )
+    fwd.add_argument(
+        "--tunnel-xray-sni",
+        default=None,
+        help="SNI target for inter-node VLESS+Reality tunnel (default: same as --reality-sni)",
+    )
+    fwd.add_argument(
+        "--tunnel-xray-port",
+        type=int,
+        default=None,
+        help="Port on exit node for VLESS+Reality tunnel (default: 443)",
+    )
 
     # -- Exit node role ----------------------------------------------------
     exit_node = parser.add_argument_group("exit node role")
@@ -293,7 +304,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     exit_node.add_argument(
         "--exit-node-tunnel-type",
         default=None,
-        help="Tunnel type for exit node role: wireguard, ssh, or tailscale",
+        help="Tunnel type for exit node role: wireguard, ssh, tailscale, or xray",
     )
     exit_node.add_argument(
         "--exit-node-peer-ip",

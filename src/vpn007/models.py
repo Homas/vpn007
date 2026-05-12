@@ -13,6 +13,7 @@ class TunnelType(Enum):
     WIREGUARD = "wireguard"
     SSH = "ssh"
     TAILSCALE = "tailscale"
+    XRAY = "xray"
 
 
 class ForwardingMode(Enum):
@@ -196,6 +197,9 @@ class DeployConfig:
     reconnect_initial_delay_sec: int = 5
     reconnect_max_delay_sec: int = 300
     tunnel_subnet: str = "10.99.0.0/30"  # Point-to-point tunnel subnet
+    # Xray tunnel specific (used when tunnel_type=xray)
+    tunnel_xray_sni: str | None = None  # SNI for inter-node Reality (defaults to reality_sni)
+    tunnel_xray_port: int = 443  # Port on exit node for VLESS+Reality tunnel
 
     # Exit node role (dual-role: this VM also serves as exit node for another)
     exit_node_enabled: bool = False

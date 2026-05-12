@@ -341,13 +341,15 @@ When both `SSH_APPROVED_IPS` and `SSH_APPROVED_HOSTNAMES` are empty, SSH is open
 |------|---------|---------|-------------|
 | `--forwarding-enabled` | `FORWARDING_ENABLED` | `false` | Enable traffic forwarding to secondary VM |
 | `--forwarding-mode` | `FORWARDING_MODE` | `ports` | Forwarding mode: `ports` (per-port DNAT) or `all` (full-traffic routing) |
-| `--tunnel-type` | `TUNNEL_TYPE` | *(none)* | Tunnel type: `wireguard`, `ssh`, or `tailscale` |
+| `--tunnel-type` | `TUNNEL_TYPE` | *(none)* | Tunnel type: `wireguard`, `ssh`, `tailscale`, or `xray` |
 | `--secondary-vm-ip` | `SECONDARY_VM_IP` | *(none)* | IP of the secondary VM |
 | `--reverse-initiated` | `REVERSE_INITIATED` | `false` | Secondary VM initiates tunnel back |
 | `--forwarding-ports` | `FORWARDING_PORTS` | *(none)* | Port forwards (`proto:listen:fwd[:desc],...`) |
 | `--reconnect-initial-delay-sec` | `RECONNECT_INITIAL_DELAY_SEC` | `5` | Initial reconnect delay (seconds) |
 | `--reconnect-max-delay-sec` | `RECONNECT_MAX_DELAY_SEC` | `300` | Max reconnect delay (seconds) |
 | `--tunnel-subnet` | `TUNNEL_SUBNET` | `10.99.0.0/30` | WireGuard tunnel subnet |
+| `--tunnel-xray-sni` | `TUNNEL_XRAY_SNI` | *(same as `REALITY_SNI`)* | SNI for inter-node VLESS+Reality tunnel |
+| `--tunnel-xray-port` | `TUNNEL_XRAY_PORT` | `443` | Port on exit node for VLESS+Reality tunnel |
 
 #### Exit node role
 
@@ -410,8 +412,8 @@ The deployer validates all parameters at startup and exits with a clear error me
 | `AWG_S1`-`H4` group | All eight must be provided together, or all omitted for auto-generation |
 | `TLS_VERSIONS` | Comma-separated; only `1.2` and `1.3` accepted |
 | `HTTPS_PORT` | Integer 1-65535 |
-| `TUNNEL_TYPE` | Must be `wireguard`, `ssh`, or `tailscale` when `FORWARDING_ENABLED=true` |
-| `FORWARDING_MODE` | Must be `ports` or `all`; `all` requires `wireguard` or `tailscale` tunnel type |
+| `TUNNEL_TYPE` | Must be `wireguard`, `ssh`, `tailscale`, or `xray` when `FORWARDING_ENABLED=true` |
+| `FORWARDING_MODE` | Must be `ports` or `all`; `all` requires `wireguard`, `tailscale`, or `xray` tunnel type |
 | `SECONDARY_VM_IP` | Required when `FORWARDING_ENABLED=true` |
 | `FORWARDING_PORTS` | Required when `FORWARDING_MODE=ports`; format `proto:port:port[:desc]` |
 | `EXIT_NODE_TUNNEL_TYPE` | Required when `EXIT_NODE_ENABLED=true` |
@@ -830,13 +832,14 @@ If the tunnel between VM-A and VM-B goes down:
 
 ### Supported tunnel types
 
-All three tunnel types are supported for both the forwarding role (`TUNNEL_TYPE`) and the exit-node role (`EXIT_NODE_TUNNEL_TYPE`):
+All four tunnel types are supported for both the forwarding role (`TUNNEL_TYPE`) and the exit-node role (`EXIT_NODE_TUNNEL_TYPE`):
 
 | Tunnel type | Use case | Requirements on peer VM |
 |-------------|----------|------------------------|
 | `wireguard` | Best performance, lowest overhead | WireGuard or AmneziaWG kernel module |
 | `ssh` | Works through most firewalls, no extra software | SSH server + autossh |
 | `tailscale` | Easiest setup, works behind NAT | Tailscale client |
+| `xray` | DPI-resistant (indistinguishable from TLS 1.3) | Xray binary or full VPN007 node |
 
 ### Step 1: Configure VM-A (entrance node)
 
@@ -943,7 +946,7 @@ python3 /root/forwarding-install.py
 
 The script will automatically:
 
-1. Install the tunnel endpoint (WireGuard, autossh, or Tailscale — depending on `TUNNEL_TYPE`)
+1. Install the tunnel endpoint (WireGuard, autossh, Tailscale, or Xray — depending on `TUNNEL_TYPE`)
 2. Configure the encrypted tunnel to VM-A
 3. Set up nftables DNAT/SNAT rules to route forwarded traffic to the internet
 4. Configure automatic reconnection with exponential backoff (5s → 10s → 20s → ... → 300s max)
@@ -1011,6 +1014,28 @@ The simplest option — both VMs join the same tailnet and traffic is routed ove
 # The forwarding script configures VM-B to accept routes from VM-A
 tailscale up --accept-routes
 ```
+
+#### Xray VLESS+Reality tunnel
+
+The most DPI-resistant option — the inter-node connection is indistinguishable from a legitimate TLS 1.3 connection to a popular website (e.g., `www.google.com`). Best for scenarios where the link between VM-A and VM-B crosses a censored network.
+
+**Lightweight exit node (VM-B has no VPN007 stack):**
+
+The forwarding script installs a standalone Xray binary on VM-B that listens for VLESS+Reality connections. VM-A runs an Xray client that connects to VM-B on port 443 — to any observer, it looks like VM-A is browsing a website.
+
+**Full VPN007 node as exit (VM-B runs the full stack):**
+
+No extra software needed. The primary VM connects as a regular VLESS client to VM-B's existing 3x-ui Xray instance. The tunnel traffic is completely blended with regular VPN client connections — an observer cannot distinguish the relay tunnel from normal client traffic.
+
+```bash
+# .env on VM-A
+TUNNEL_TYPE=xray
+SECONDARY_VM_IP=198.51.100.20
+TUNNEL_XRAY_SNI=www.google.com   # Can differ from client-facing REALITY_SNI
+TUNNEL_XRAY_PORT=443
+```
+
+The deployer generates credentials (UUID, Reality public key, short ID) that VM-B needs. For a lightweight exit node, these are embedded in the forwarding script. For a full node, add the UUID as a client in 3x-ui.
 
 ### Reverse-initiated connections
 
@@ -1349,6 +1374,18 @@ After deploying both VMs:
 2. Run the setup script: `chmod +x exit-node/setup-exit-node.sh && sudo ./exit-node/setup-exit-node.sh`
 3. Ensure both VMs are on the same Tailscale tailnet
 4. The systemd service (`vpn007-exit-node-tailscale`) loads nftables rules on boot
+
+**Xray (lightweight exit node):**
+
+2. Run the setup script: `chmod +x exit-node/setup-exit-node.sh && sudo ./exit-node/setup-exit-node.sh`
+3. Share `exit-node/tunnel-credentials.txt` with the primary VM operator
+4. The systemd service (`vpn007-xray-tunnel`) runs Xray with VLESS+Reality
+
+**Xray (full VPN007 node as exit):**
+
+2. Add the UUID from `exit-node/tunnel-credentials.txt` as a client in your existing 3x-ui VLESS+Reality inbound
+3. Share the connection details (UUID, Reality public key, short ID) with the primary VM operator
+4. No extra processes or ports needed — the tunnel blends with regular VPN client traffic
 
 See `deploy/exit-node/README.md` for detailed instructions generated for your specific configuration.
 
